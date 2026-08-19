@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runCustomImageTask, pollCustomImageTask } from "@/app/api/image-tasks/image-task-custom";
+import { runComfyuiImageTask, pollComfyuiImageTask, runCustomImageTask, pollCustomImageTask } from "@/app/api/image-tasks/image-task-custom";
 import { runOpenAiImageTask } from "@/app/api/image-tasks/image-task-openai";
 import { createUpstream } from "@/app/api/video-generation-tasks/video-generation-route";
 import type { SystemChannelProtocol } from "@/lib/auth/store-types";
@@ -61,8 +61,8 @@ describe("active media protocols over TCP fixtures", () => {
         const createPath = definition.operations.video!.createPath!;
         const config = videoConfig(definition.id, origin, model);
         const upstream = await createUpstream("user-live", "", "", config, "animate a blue logo", { videoSeconds: 5, size: "16:9", vquality: "720", videoGenerateAudio: false }, [], MULTIPLIERS, `video-${definition.id}`);
-        await expectVideoResult(config, upstream);
-        expectVideoRequests(createPath.replace(":model", model), definition.operations.video!.queryPath!, model, upstream.id, false, definition.id === "runninghub" ? "POST" : "GET");
+        await expectVideoResult(config, upstream, definition.id);
+        expectVideoRequests(createPath.replace(":model", model), definition.operations.video!.queryPath!, model, upstream.id, false, definition.id === "runninghub" ? "POST" : "GET", definition.id);
     });
 
     it.each(STRICT_VIDEO_PROTOCOLS.filter((definition) => definition.operations.video?.supportsReferenceImage))("completes $id image-to-video with a transmitted reference", async (definition) => {
@@ -75,8 +75,8 @@ describe("active media protocols over TCP fixtures", () => {
         const config = videoConfig(definition.id, origin, model);
         const references = [{ type: "image" as const, url: `${origin}/media/fixture.png` }];
         const upstream = await createUpstream("user-live", "", "", config, "animate the reference image", { videoSeconds: 5, size: "16:9", vquality: "720", videoGenerateAudio: false }, references, MULTIPLIERS, `image-video-${definition.id}`);
-        await expectVideoResult(config, upstream);
-        expectVideoRequests(createPath.replace(":model", model), queryPath, model, upstream.id, true, definition.id === "runninghub" ? "POST" : "GET");
+        await expectVideoResult(config, upstream, definition.id);
+        expectVideoRequests(createPath.replace(":model", model), queryPath, model, upstream.id, true, definition.id === "runninghub" ? "POST" : "GET", definition.id);
     });
 
     it.each(ADVANCED_IMAGE_PROTOCOLS)("completes configured $id image creation", async (definition) => {
@@ -198,6 +198,10 @@ function videoConfig(protocol: SystemChannelProtocol, baseUrl: string, model: st
 }
 
 async function runImageTask(task: ImageTask, protocol: SystemChannelProtocol) {
+    if (protocol === "comfyui") {
+        const submitted = await runComfyuiImageTask(task, origin, origin, "", true);
+        return submitted.pending ? pollComfyuiImageTask(task, submitted.pending.id, submitted.pending.pollBaseUrl, "") : submitted;
+    }
     const declarative = protocol === "stable-diffusion" || protocol === "yumeng";
     const submitted = declarative ? await runCustomImageTask(task, origin, origin, "", protocol === "yumeng") : await runOpenAiImageTask(task, origin, origin, "", true);
     return submitted.pending ? pollCustomImageTask(task, submitted.pending.id, submitted.pending.pollBaseUrl, "") : submitted;
@@ -217,17 +221,17 @@ async function expectImageResult(result: { dataUrl?: string; remoteUrl?: string 
 }
 
 function expectCreateRequest(expectedPath: string, referenceRequired: boolean) {
-    const requests = fixture.requests.filter((request) => request.method === "POST");
+    const requests = fixture.requests.filter((request) => request.method === "POST" && request.path !== "/upload/image");
     expect(requests).toHaveLength(1);
     expect(requests[0]?.path).toBe(expectedPath);
     const body = requestBodyText(requests[0]);
     expect(requestContainsReference(requests[0]), referenceRequired ? `reference media was not transmitted: ${body}` : `text-only request unexpectedly included reference media: ${body}`).toBe(referenceRequired);
 }
 
-async function expectVideoResult(config: SystemGenerationChannelConfig, upstream: VideoTask["upstream"]) {
+async function expectVideoResult(config: SystemGenerationChannelConfig, upstream: VideoTask["upstream"], protocol = "") {
     expect(upstream?.id).toBeTruthy();
     const result = await queryVideoTaskUpstream({ config, upstream, userId: "user-live" } as unknown as VideoTask, "", "");
-    expect(result).toMatchObject({ state: "result_ready", resultUrl: expect.stringContaining("/media/fixture.mp4") });
+    expect(result).toMatchObject({ state: "result_ready", resultUrl: protocol === "comfyui" ? expect.stringContaining("/view?filename=") : expect.stringContaining("/media/fixture.mp4") });
     if (result.state !== "result_ready") throw new Error(`video fixture did not return a result: ${result.state}`);
     const response = await fetch(result.resultUrl);
     expect(response.ok).toBe(true);
@@ -235,14 +239,18 @@ async function expectVideoResult(config: SystemGenerationChannelConfig, upstream
     expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
 }
 
-function expectVideoRequests(createPath: string, queryPath: string, model: string, taskId: string, referenceRequired: boolean, queryMethod: "GET" | "POST" = "GET") {
+function expectVideoRequests(createPath: string, queryPath: string, model: string, taskId: string, referenceRequired: boolean, queryMethod: "GET" | "POST" = "GET", protocol = "") {
     const expectedQuery = queryPath.replace(":model", model).replace(":task_id", taskId);
-    const createRequests = fixture.requests.filter((request) => request.method === "POST" && request.path !== expectedQuery);
+    const createRequests = fixture.requests.filter((request) => request.method === "POST" && request.path !== expectedQuery && request.path !== "/upload/image");
     expect(createRequests).toHaveLength(1);
     expect(createRequests[0]?.path).toBe(createPath);
     expect(requestContainsReference(createRequests[0]), referenceRequired ? "reference image was not transmitted to the video provider" : "text-only video request unexpectedly included a reference").toBe(referenceRequired);
     expect(fixture.requests.some((request) => request.method === queryMethod && request.path === expectedQuery)).toBe(true);
-    expect(fixture.requests.some((request) => request.method === "GET" && request.path === "/media/fixture.mp4")).toBe(true);
+    if (protocol === "comfyui") {
+        expect(fixture.requests.some((request) => request.method === "GET" && request.path === "/view")).toBe(true);
+    } else {
+        expect(fixture.requests.some((request) => request.method === "GET" && request.path === "/media/fixture.mp4")).toBe(true);
+    }
 }
 
 function requestContainsReference(request: (typeof fixture.requests)[number] | undefined) {

@@ -30,7 +30,7 @@ vi.mock("@/lib/server/internal-origin", () => ({
 vi.mock("@/lib/server/media-concurrency", () => ({ acquireMediaConcurrency: () => ({ release: vi.fn() }), withMediaConcurrency: (response: Response) => response }));
 vi.mock("@/lib/server/proxy-dispatcher", () => ({ configureServerProxyDispatcher: vi.fn() }));
 
-import { runCustomImageTask, pollCustomImageTask } from "@/app/api/image-tasks/image-task-custom";
+import { runComfyuiImageTask, pollComfyuiImageTask, runCustomImageTask, pollCustomImageTask } from "@/app/api/image-tasks/image-task-custom";
 import { runOpenAiImageTask } from "@/app/api/image-tasks/image-task-openai";
 import { GET as proxyGet, HEAD as proxyHead, POST as proxyPost } from "@/app/api/ai/system/[channelId]/[...path]/route";
 import { PATCH as saveAdminSettings } from "@/app/api/admin/settings/route";
@@ -114,12 +114,12 @@ describe("active protocols through persisted admin settings and the system proxy
 
         const generated = await runImage(imageTask(channel, false), definition.id);
         await expectImageResult(generated);
-        expectProxyRequests(channel, operation.createPath, model, false);
+        expectProxyRequests(channel, operation.createPath, model, false, undefined, undefined, "GET", definition.id);
 
         fixture.requests.splice(0);
         const edited = await runImage(imageTask(channel, true), definition.id);
         await expectImageResult(edited);
-        expectProxyRequests(channel, operation.editPath || operation.createPath, model, true);
+        expectProxyRequests(channel, operation.editPath || operation.createPath, model, true, undefined, undefined, "GET", definition.id);
     });
 
     it.each(VIDEO_PROTOCOLS)("routes $id text-to-video and image-to-video creation, polling, and media", async (definition) => {
@@ -131,7 +131,7 @@ describe("active protocols through persisted admin settings and the system proxy
 
         const created = await createUpstream("proxy-user", INTERNAL_ORIGIN, "", channel.config, "animate a blue logo", videoParameters(), [], MULTIPLIERS, `text-video-${definition.id}`);
         await expectVideoResult(channel, created);
-        expectProxyRequests(channel, operation.createPath, model, false, operation.queryPath, created.id, definition.id === "runninghub" ? "POST" : "GET");
+        expectProxyRequests(channel, operation.createPath, model, false, operation.queryPath, created.id, definition.id === "runninghub" ? "POST" : "GET", definition.id);
 
         fixture.requests.splice(0);
         const createPath = operation.imageToVideoPath || operation.createPath;
@@ -147,7 +147,7 @@ describe("active protocols through persisted admin settings and the system proxy
             `image-video-${definition.id}`,
         );
         await expectVideoResult(channel, referenced);
-        expectProxyRequests(channel, createPath, model, true, operation.queryPath, referenced.id, definition.id === "runninghub" ? "POST" : "GET");
+        expectProxyRequests(channel, createPath, model, true, operation.queryPath, referenced.id, definition.id === "runninghub" ? "POST" : "GET", definition.id);
     });
 
     it.each(AUDIO_PROTOCOLS)("persists and routes $id audio requests and returned media", async (definition) => {
@@ -308,7 +308,7 @@ type ProxyChannel = {
 };
 
 function fixtureBaseUrl(protocol: SystemChannelProtocol, apiFormat: "openai" | "gemini") {
-    if (["custom", "stable-diffusion", "yumeng", "seedance-special", "runninghub"].includes(protocol)) return fixtureOrigin;
+    if (["custom", "stable-diffusion", "yumeng", "seedance-special", "runninghub", "comfyui"].includes(protocol)) return fixtureOrigin;
     return `${fixtureOrigin}/${apiFormat === "gemini" ? "v1beta" : "v1"}`;
 }
 
@@ -341,6 +341,10 @@ function imageTask(channel: ProxyChannel, edit: boolean): ImageTask {
 }
 
 async function runImage(task: ImageTask, protocol: SystemChannelProtocol) {
+    if (protocol === "comfyui") {
+        const submitted = await runComfyuiImageTask(task, INTERNAL_ORIGIN, fixtureOrigin, "", true);
+        return submitted.pending ? pollComfyuiImageTask(task, submitted.pending.id, submitted.pending.pollBaseUrl, "", true) : submitted;
+    }
     const declarative = protocol === "custom" || protocol === "stable-diffusion" || protocol === "yumeng";
     const submitted = declarative ? await runCustomImageTask(task, INTERNAL_ORIGIN, fixtureOrigin, "", true) : await runOpenAiImageTask(task, INTERNAL_ORIGIN, fixtureOrigin, "", true);
     return submitted.pending ? pollCustomImageTask(task, submitted.pending.id, submitted.pending.pollBaseUrl, "", true) : submitted;
@@ -375,16 +379,18 @@ async function expectVideoResult(channel: ProxyChannel, upstream: VideoTask["ups
     expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
 }
 
-function expectProxyRequests(channel: ProxyChannel, createPath: string | undefined, model: string, referenceRequired: boolean, queryPath?: string, taskId?: string, queryMethod: "GET" | "POST" = "GET") {
+function expectProxyRequests(channel: ProxyChannel, createPath: string | undefined, model: string, referenceRequired: boolean, queryPath?: string, taskId?: string, queryMethod: "GET" | "POST" = "GET", protocol = "") {
     if (!createPath) throw new Error("Protocol operation is missing createPath");
     const expectedQuery = queryPath ? upstreamPath(channel.upstreamBaseUrl, queryPath.replace(":model", model).replace(":task_id", taskId || "")) : "";
-    const createRequests = fixture.requests.filter((request) => request.method === "POST" && request.path !== expectedQuery);
+    const createRequests = fixture.requests.filter((request) => request.method === "POST" && request.path !== expectedQuery && request.path !== "/upload/image");
     expect(createRequests).toHaveLength(1);
     const request = createRequests[0]!;
     const body = request.body.toString(request.contentType.includes("multipart/form-data") ? "latin1" : "utf8");
     expect(request.path).toBe(upstreamPath(channel.upstreamBaseUrl, createPath.replace(":model", model)));
     expect(request.body.byteLength).toBeGreaterThan(0);
-    expect(decodeURIComponent(request.path).includes(model) || body.includes(model)).toBe(true);
+    if (protocol !== "comfyui") {
+        expect(decodeURIComponent(request.path).includes(model) || body.includes(model)).toBe(true);
+    }
     expect(request.headers["idempotency-key"]).toBeTruthy();
     expect(request.headers["x-client-request-id"]).toBeTruthy();
     Object.entries(channel.expectedAuthHeaders).forEach(([key, value]) => expect(request.headers[key.toLowerCase()]).toBe(value));

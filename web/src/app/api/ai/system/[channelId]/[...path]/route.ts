@@ -124,7 +124,18 @@ async function proxySystemRequest(request: Request, context: RouteContext) {
         pointsUsageKind: pointsRequest?.usageKind,
         upstreamTaskIdHint: readRequestTaskId(readRequestBody(contentType, requestBody.pointsPayload)),
         paths: {
-            create: [globalPreset?.createPath, modelConfig?.createPath, modelConfig?.editPath, modelConfig?.imageToVideoPath, channel.advancedConfig?.createPath, channel.advancedConfig?.editPath, channel.advancedConfig?.imageToVideoPath],
+            create: [
+                globalPreset?.createPath,
+                modelConfig?.createPath,
+                modelConfig?.editPath,
+                modelConfig?.imageToVideoPath,
+                modelConfig?.uploadPath,
+                channel.advancedConfig?.createPath,
+                channel.advancedConfig?.editPath,
+                channel.advancedConfig?.imageToVideoPath,
+                channel.advancedConfig?.uploadPath,
+            ],
+            upload: [modelConfig?.uploadPath, channel.advancedConfig?.uploadPath],
             query: [globalPreset?.queryPath, modelConfig?.queryPath, channel.advancedConfig?.queryPath],
             cancel: [
                 { path: modelConfig?.cancelPath, method: modelConfig?.cancelMethod },
@@ -588,7 +599,7 @@ function readMultipartFields(text: string): Record<string, string> {
 }
 
 function targetUrl(baseUrl: string, apiFormat: "openai" | "gemini", path: string[], search: string, globalAiOpc = false, protocol?: import("@/lib/auth/store").SystemChannelProtocol) {
-    const usesLiteralPath = protocol === "seedance-special" || protocol === "stable-diffusion" || protocol === "yumeng" || protocol === "runninghub" || protocol === "custom";
+    const usesLiteralPath = protocol === "seedance-special" || protocol === "stable-diffusion" || protocol === "yumeng" || protocol === "runninghub" || protocol === "comfyui" || protocol === "custom";
     const cleanPath = !usesLiteralPath && (path[0] === "v1" || path[0] === "v1beta") ? path.slice(1) : path;
     const resolvedBaseUrl = protocol === "yumeng" ? normalizeYumengModelCenterBaseUrl(baseUrl) : baseUrl;
     if (isAgnesApiBaseUrl(resolvedBaseUrl) && cleanPath[0]?.toLowerCase() === "agnesapi") {

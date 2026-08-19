@@ -211,7 +211,7 @@ export function matchesApiHost(baseUrl: string, hostname: string) {
 
 export function taskUrl(config: ImageTaskConfig, path: string, origin: string) {
     const protocol = resolveChannelModelConfig(config.advancedConfig, config.model)?.protocol || config.advancedConfig?.protocol;
-    const apiBase = protocol === "custom" || protocol === "stable-diffusion" || protocol === "yumeng" ? absoluteApiBaseUrl(config.baseUrl, origin) : normalizeApiBaseUrl(config.baseUrl, config.apiFormat, origin);
+    const apiBase = protocol === "custom" || protocol === "stable-diffusion" || protocol === "yumeng" || protocol === "comfyui" ? absoluteApiBaseUrl(config.baseUrl, origin) : normalizeApiBaseUrl(config.baseUrl, config.apiFormat, origin);
     return `${apiBase}${path}`;
 }
 

@@ -17,6 +17,7 @@ const CHANNEL_PROTOCOLS: SystemChannelProtocol[] = [
     "volcengine-video",
     "seedance-special",
     "runninghub",
+    "comfyui",
     "custom",
     "compatible",
 ];
@@ -55,6 +56,13 @@ export function normalizeSystemChannelAdvancedConfig(config: Partial<SystemChann
         statusField: textOrEmpty(config.statusField, 500),
         durationRange: textOrEmpty(config.durationRange, 120),
         ...(textOrEmpty(config.resolution, 60) ? { resolution: textOrEmpty(config.resolution, 60) } : {}),
+        ...(textOrEmpty(config.workflowTemplate, 200_000) ? { workflowTemplate: textOrEmpty(config.workflowTemplate, 200_000) } : {}),
+        ...(normalizeWorkflowInjection(config.workflowInjection) ? { workflowInjection: normalizeWorkflowInjection(config.workflowInjection) } : {}),
+        ...(positiveNumber(config.maxPixelSeconds) ? { maxPixelSeconds: positiveNumber(config.maxPixelSeconds)! } : {}),
+        ...(textOrEmpty(config.outputNodeId, 120) ? { outputNodeId: textOrEmpty(config.outputNodeId, 120) } : {}),
+        ...(textOrEmpty(config.s3BaseUrl, 500) ? { s3BaseUrl: textOrEmpty(config.s3BaseUrl, 500) } : {}),
+        ...(normalizeApiPath(config.uploadPath) ? { uploadPath: normalizeApiPath(config.uploadPath) } : {}),
+        ...(normalizeApiPath(config.viewPath) ? { viewPath: normalizeApiPath(config.viewPath) } : {}),
         referenceRule: textOrEmpty(config.referenceRule, 1000),
         supportsReferenceImage: Boolean(config.supportsReferenceImage),
         supportsReferenceVideo: Boolean(config.supportsReferenceVideo),
@@ -74,6 +82,20 @@ export function normalizeApiPath(value: unknown) {
 
 export function textOrEmpty(value: unknown, maxLength: number) {
     return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function normalizeWorkflowInjection(value: unknown): Record<string, [string, string]> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const entries = Object.entries(value as Record<string, unknown>).flatMap(([key, raw]) => {
+        if (!Array.isArray(raw) || raw.length !== 2 || typeof raw[0] !== "string" || typeof raw[1] !== "string") return [];
+        return [[key, [raw[0].slice(0, 120), raw[1].slice(0, 300)] as [string, string]] as const];
+    });
+    return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function positiveNumber(value: unknown): number | null {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 function normalizeChannelModelCapabilities(value: unknown) {

@@ -32,6 +32,8 @@ import { buildOpenAiVideoFormData } from "./video-task-openai";
 import { normalizeVideoGenerationReferences, regularVideoReferences, videoFrameReferences, type VideoGenerationReference } from "@/lib/video-reference-contract";
 import { assertYumengVideoReferences, buildYumengVideoRequest } from "@/lib/yumeng-model-center";
 import { buildRunningHubVideoRequest, parseRunningHubCreateResponse, runningHubVideoRejection, RUNNING_HUB_QUERY_PATH } from "@/lib/runninghub-client";
+import { buildComfyuiPromptRequest, comfyuiVideoDimensions, COMFYUI_DEFAULT_INJECTION_H3, parseComfyuiPromptResponse, resolveComfyuiVideoGuard } from "@/lib/comfyui-client";
+import { resolveChannelModelConfig } from "@/lib/channel-protocol-registry";
 
 const CREATE_PATHS = ["/video/generations", "/videos/generations", "/videos/videos", "/videos"];
 type CreateVideoTaskBody = { config?: Record<string, unknown>; prompt?: string; references?: VideoGenerationReference[]; source?: string; context?: GenerationTaskContext };
@@ -82,6 +84,24 @@ export async function POST(request: Request) {
             .map((channel) => runningHubVideoRejection({ advancedConfig: channel.advancedConfig, capabilityProfile: channel.capabilityProfile, videoSeconds: requestedParameters.videoSeconds }))
             .find(Boolean);
         if (runningHubRejection) return NextResponse.json({ error: runningHubRejection, canRetry: false }, { status: 400 });
+        const comfyuiRejection = channels
+            .filter((channel) => channel.advancedConfig?.protocol === "comfyui")
+            .map((channel) => {
+                const modelConfig = resolveChannelModelConfig(channel.advancedConfig, channel.model);
+                const dimensions = comfyuiVideoDimensions(normalizeVideoAspectRatio(requestedParameters.size));
+                return resolveComfyuiVideoGuard({
+                    durationSeconds: requestedParameters.videoSeconds === -1 ? settings.generationDefaults.videoSeconds : requestedParameters.videoSeconds,
+                    width: dimensions.width,
+                    height: dimensions.height,
+                    advancedConfig: {
+                        durationRange: modelConfig?.durationRange || channel.advancedConfig?.durationRange,
+                        maxDurationSeconds: channel.capabilityProfile?.maxDurationSeconds,
+                        maxPixelSeconds: channel.advancedConfig?.maxPixelSeconds ?? modelConfig?.maxPixelSeconds,
+                    },
+                });
+            })
+            .find(Boolean);
+        if (comfyuiRejection) return NextResponse.json({ error: comfyuiRejection, canRetry: false }, { status: 400 });
         let lastError: unknown;
         let capabilityError: unknown;
         let attempts: GenerationAttempt[] = [];
@@ -285,6 +305,52 @@ export async function createUpstream(
         ...(lastFrameUrl ? { last_frame: lastFrameUrl, last_frame_url: lastFrameUrl } : {}),
     };
     const globalPreset = globalAiOpcVideoPreset(channel.advancedConfig, channel.model);
+    const comfyuiModelConfig = channel.advancedConfig?.protocol === "comfyui" ? resolveChannelModelConfig(channel.advancedConfig, channel.model) : undefined;
+    const comfyuiTemplate = channel.advancedConfig?.protocol === "comfyui" ? channel.advancedConfig?.workflowTemplate?.trim() || comfyuiModelConfig?.workflowTemplate || "" : "";
+    let comfyuiRefImage = "";
+    if (channel.advancedConfig?.protocol === "comfyui" && (firstFrameUrl || requestImage)) {
+        const referenceUrl = firstFrameUrl || requestImage;
+        const uploadPath = comfyuiModelConfig?.uploadPath || channel.advancedConfig?.uploadPath || "/upload/image";
+        const uploadUrl = `${origin}${channel.baseUrl.replace(/\/+$/, "")}${uploadPath.startsWith("/") ? uploadPath : `/${uploadPath}`}`;
+        const downloaded = await fetchInternalApi(referenceUrl, { headers: { cookie }, signal: AbortSignal.timeout(60_000) });
+        if (!downloaded.ok) throw new SafeCandidateFailure("ComfyUI 参考图无法读取");
+        const blob = await downloaded.blob();
+        const form = new FormData();
+        form.append("image", blob, "reference.png");
+        form.append("overwrite", "true");
+        const uploadResponse = await proxyFetch(origin, channel.baseUrl, uploadPath, cookie, {
+            method: "POST",
+            headers: { "Idempotency-Key": billingRequestId, "X-Client-Request-Id": billingRequestId, ...systemAiBillingHeaders(generationModelId(channel), `video-request:${billingRequestId}`, channel.model) },
+            body: form,
+        });
+        if (!uploadResponse.ok) throw new SafeCandidateFailure((await readVideoProviderHttpError(await uploadResponse.text().catch(() => ""), uploadResponse.status)) || "ComfyUI 参考图上传失败");
+        const uploaded = (await uploadResponse.json().catch(() => ({}))) as { name?: string };
+        if (!uploaded.name) throw new SafeCandidateFailure("ComfyUI 参考图上传没有返回文件名");
+        comfyuiRefImage = uploaded.name;
+    }
+    const comfyuiRequest =
+        channel.advancedConfig?.protocol === "comfyui" && comfyuiTemplate
+            ? buildComfyuiPromptRequest({
+                  workflow: (() => {
+                      try {
+                          return JSON.parse(comfyuiTemplate) as Record<string, unknown>;
+                      } catch {
+                          throw new SafeCandidateFailure("ComfyUI 工作流模板不是合法 JSON");
+                      }
+                  })(),
+                  injection: channel.advancedConfig?.workflowInjection || comfyuiModelConfig?.workflowInjection || COMFYUI_DEFAULT_INJECTION_H3,
+                  clientId: `vozeb-video-${userId.slice(0, 40)}`,
+                  prompt,
+                  durationSeconds: values.duration as number,
+                  width: comfyuiVideoDimensions(values.aspect_ratio as string).width,
+                  height: comfyuiVideoDimensions(values.aspect_ratio as string).height,
+                  refImage: comfyuiRefImage || undefined,
+                  advancedConfig: {
+                      durationRange: comfyuiModelConfig?.durationRange || channel.advancedConfig?.durationRange,
+                      maxPixelSeconds: channel.advancedConfig?.maxPixelSeconds ?? comfyuiModelConfig?.maxPixelSeconds,
+                  },
+              })
+            : null;
     const runningHubRequest =
         channel.advancedConfig?.protocol === "runninghub"
             ? buildRunningHubVideoRequest({
@@ -304,64 +370,74 @@ export async function createUpstream(
     const multipart = channel.advancedConfig?.requestTemplate?.trim().toLowerCase().startsWith("multipart/form-data") === true;
     const payload = multipart
         ? undefined
-        : runningHubRequest
-          ? runningHubRequest.body
-          : channel.advancedConfig?.protocol === "vozeb-recommended"
-            ? buildVozebRecommendedVideoRequest({
-                  model: channel.model,
-                  prompt,
-                  duration: values.duration as number,
-                  aspectRatio: values.aspect_ratio as string,
-                  resolution: values.resolution as string,
-                  generateAudio,
-                  images,
-                  videos,
-                  audios,
-              })
-            : channel.advancedConfig?.protocol === "seedance-special"
-              ? buildSeedanceSpecialRequest({
+        : comfyuiRequest
+          ? comfyuiRequest.body
+          : runningHubRequest
+            ? runningHubRequest.body
+            : channel.advancedConfig?.protocol === "vozeb-recommended"
+              ? buildVozebRecommendedVideoRequest({
                     model: channel.model,
                     prompt,
-                    duration: values.duration === -1 ? 5 : (values.duration as number),
-                    ratio: values.ratio as string,
+                    duration: values.duration as number,
+                    aspectRatio: values.aspect_ratio as string,
+                    resolution: values.resolution as string,
                     generateAudio,
-                    references,
+                    images,
+                    videos,
+                    audios,
                 })
-              : channel.advancedConfig?.protocol === "yumeng"
-                ? buildYumengVideoRequest({
+              : channel.advancedConfig?.protocol === "seedance-special"
+                ? buildSeedanceSpecialRequest({
                       model: channel.model,
                       prompt,
-                      duration: values.duration as number,
-                      aspectRatio: values.aspect_ratio as string,
-                      resolution: values.resolution as string,
+                      duration: values.duration === -1 ? 5 : (values.duration as number),
+                      ratio: values.ratio as string,
                       generateAudio,
-                      watermark: raw.videoWatermark === "true",
-                      images: requestImages,
-                      videos,
-                      audios,
-                      firstFrame: firstFrameUrl || undefined,
-                      lastFrame: lastFrameUrl || undefined,
+                      references,
                   })
-                : globalPreset
-                  ? buildGlobalAiOpcVideoRequest(globalPreset, {
+                : channel.advancedConfig?.protocol === "yumeng"
+                  ? buildYumengVideoRequest({
                         model: channel.model,
                         prompt,
                         duration: values.duration as number,
-                        ratio: values.ratio as string,
+                        aspectRatio: values.aspect_ratio as string,
                         resolution: values.resolution as string,
-                        images: requestImages.length ? requestImages : requestImage ? [requestImage] : [],
+                        generateAudio,
+                        watermark: raw.videoWatermark === "true",
+                        images: requestImages,
                         videos,
                         audios,
-                        generateAudio,
                         firstFrame: firstFrameUrl || undefined,
                         lastFrame: lastFrameUrl || undefined,
                     })
-                  : buildVideoProviderRequest(channel.advancedConfig?.requestTemplate, defaults, values);
+                  : globalPreset
+                    ? buildGlobalAiOpcVideoRequest(globalPreset, {
+                          model: channel.model,
+                          prompt,
+                          duration: values.duration as number,
+                          ratio: values.ratio as string,
+                          resolution: values.resolution as string,
+                          images: requestImages.length ? requestImages : requestImage ? [requestImage] : [],
+                          videos,
+                          audios,
+                          generateAudio,
+                          firstFrame: firstFrameUrl || undefined,
+                          lastFrame: lastFrameUrl || undefined,
+                      })
+                    : buildVideoProviderRequest(channel.advancedConfig?.requestTemplate, defaults, values);
     const requestBody = multipart
         ? await buildOpenAiVideoFormData({ model: channel.model, prompt, seconds: values.seconds as number, width: dimensions.width, height: dimensions.height, imageUrls: firstFrameUrl ? [firstFrameUrl] : images, origin, cookie })
         : JSON.stringify(payload);
     const imageToVideoPath = images.length || firstFrameUrl ? channel.advancedConfig?.imageToVideoPath?.trim() : "";
-    const createPaths = runningHubRequest ? [runningHubRequest.endpoint] : globalPreset ? [globalPreset.createPath] : imageToVideoPath ? [imageToVideoPath] : resolvedProviderCreatePaths(channel.advancedConfig, "video", CREATE_PATHS);
+    const createPaths = comfyuiRequest
+        ? [comfyuiModelConfig?.createPath || channel.advancedConfig?.createPath || "/prompt"]
+        : runningHubRequest
+          ? [runningHubRequest.endpoint]
+          : globalPreset
+            ? [globalPreset.createPath]
+            : imageToVideoPath
+              ? [imageToVideoPath]
+              : resolvedProviderCreatePaths(channel.advancedConfig, "video", CREATE_PATHS);
     for (const path of createPaths) {
         const response = await proxyFetch(origin, channel.baseUrl, path, cookie, {
             method: "POST",
@@ -390,6 +466,35 @@ export async function createUpstream(
             throw error instanceof Error ? error : new Error("视频接口返回了无效 JSON");
         }
         const providerError = readProviderError(data);
+        if (comfyuiRequest) {
+            const parsed = parseComfyuiPromptResponse(data);
+            if ("failure" in parsed) {
+                const pointsCost = billedPointsCost(response.headers.get("x-vozeb-pro-points-cost"));
+                const pointsRecordId = response.headers.get("x-vozeb-pro-points-record-id") || undefined;
+                if (pointsCost !== undefined && pointsRecordId) await refundUserPoints(userId, generationModelId(channel), pointsCost, "video", videoUnits(raw, multipliers), undefined, pointsRecordId);
+                throw new SafeCandidateFailure(parsed.failure);
+            }
+            return {
+                id: parsed.promptId,
+                provider: "generation" as const,
+                model: channel.model,
+                pollPath: comfyuiModelConfig?.createPath || channel.advancedConfig?.createPath || "/prompt",
+                queryPath: comfyuiModelConfig?.queryPath || channel.advancedConfig?.queryPath || "/history/:task_id",
+                pollBaseUrl:
+                    upstreamOriginFor(response.headers.get("x-vozeb-pro-upstream-url") || "") ||
+                    (() => {
+                        try {
+                            return /^https?:\/\//i.test(channel.baseUrl) ? new URL(channel.baseUrl).origin : "";
+                        } catch {
+                            return "";
+                        }
+                    })() ||
+                    origin,
+                pointsCost: billedPointsCost(response.headers.get("x-vozeb-pro-points-cost")),
+                pointsUnits: videoUnits(raw, multipliers),
+                pointsRecordId: response.headers.get("x-vozeb-pro-points-record-id") || undefined,
+            };
+        }
         if (runningHubRequest) {
             const pointsCost = billedPointsCost(response.headers.get("x-vozeb-pro-points-cost"));
             const pointsRecordId = response.headers.get("x-vozeb-pro-points-record-id") || undefined;
@@ -517,6 +622,13 @@ function isGeminiVideoChannel(channel: NonNullable<ReturnType<typeof toSystemGen
     return channel.apiFormat === "gemini" && channel.advancedConfig?.protocol !== "globalaiopc";
 }
 
+function upstreamOriginFor(url: string) {
+    try {
+        return new URL(url).origin || "";
+    } catch {
+        return "";
+    }
+}
 function proxyFetch(origin: string, baseUrl: string, path: string, cookie: string, init: RequestInit) {
     const headers = new Headers(init.headers);
     const workerHeaders = maintenanceWorkerContextHeaders(cookie);
