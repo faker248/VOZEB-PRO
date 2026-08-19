@@ -308,7 +308,7 @@ type ProxyChannel = {
 };
 
 function fixtureBaseUrl(protocol: SystemChannelProtocol, apiFormat: "openai" | "gemini") {
-    if (["custom", "stable-diffusion", "yumeng", "seedance-special"].includes(protocol)) return fixtureOrigin;
+    if (["custom", "stable-diffusion", "yumeng", "seedance-special", "runninghub"].includes(protocol)) return fixtureOrigin;
     return `${fixtureOrigin}/${apiFormat === "gemini" ? "v1beta" : "v1"}`;
 }
 
