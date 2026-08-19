@@ -45,6 +45,7 @@ export type RunningHubVideoRequestInput = RunningHubDurationPolicy & {
     prompt: string;
     durationSeconds: number;
     aspectRatio: string;
+    resolution?: string;
     firstFrameUrl?: string;
     lastFrameUrl?: string;
     images?: string[];
@@ -85,7 +86,7 @@ export function buildRunningHubVideoRequest(input: RunningHubVideoRequestInput):
     const kind: RunningHubVideoKind = videos.length || audios.length || images.length > 1 ? "multimodal-to-video" : firstFrameUrl || lastFrameUrl ? "image-to-video" : "text-to-video";
     const body: Record<string, unknown> = {
         prompt: input.prompt.trim(),
-        resolution: RUNNING_HUB_RESOLUTION,
+        resolution: firstNonEmpty(input.resolution) || RUNNING_HUB_RESOLUTION,
         duration: input.durationSeconds,
         ratio: normalizeRunningHubRatio(input.aspectRatio),
     };

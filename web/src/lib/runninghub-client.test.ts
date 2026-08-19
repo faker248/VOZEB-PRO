@@ -183,3 +183,16 @@ describe("runninghub error mapping", () => {
         expect(runningHubFailureMessage({ message: "上游异常" })).toContain("上游异常");
     });
 });
+
+describe("runninghub client resolution override", () => {
+    it("uses the channel-level resolution when configured (768p international)", () => {
+        const request = buildRunningHubVideoRequest({ prompt: "一只猫", durationSeconds: 5, aspectRatio: "16:9", resolution: "768p", advancedConfig: advanced13 });
+        expect(request.body.resolution).toBe("768p");
+    });
+
+    it("keeps the 2K default when no channel resolution is configured", () => {
+        const request = buildRunningHubVideoRequest({ prompt: "一只猫", durationSeconds: 5, aspectRatio: "16:9", advancedConfig: advanced13 });
+        expect(request.body.resolution).toBe("2K");
+        expect(buildRunningHubVideoRequest({ prompt: "一只猫", durationSeconds: 5, aspectRatio: "16:9", resolution: "  ", advancedConfig: advanced13 }).body.resolution).toBe("2K");
+    });
+});

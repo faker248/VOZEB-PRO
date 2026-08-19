@@ -54,6 +54,7 @@ export function normalizeSystemChannelAdvancedConfig(config: Partial<SystemChann
         resultField: textOrEmpty(config.resultField, 500),
         statusField: textOrEmpty(config.statusField, 500),
         durationRange: textOrEmpty(config.durationRange, 120),
+        ...(textOrEmpty(config.resolution, 60) ? { resolution: textOrEmpty(config.resolution, 60) } : {}),
         referenceRule: textOrEmpty(config.referenceRule, 1000),
         supportsReferenceImage: Boolean(config.supportsReferenceImage),
         supportsReferenceVideo: Boolean(config.supportsReferenceVideo),
