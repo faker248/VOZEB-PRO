@@ -33,4 +33,5 @@ e765796c768ec56464504f4cb7c8a89c44ae5b15:web/src/lib/server/payment-checkout-pro
 e765796c768ec56464504f4cb7c8a89c44ae5b15:web/src/lib/server/payment-refund-service.ts:private-key:359
 f1acfa5dc3f92d7e39cf2221f8db5261c0be59f0:web/playwright.config.ts:generic-api-key:59
 
-21c4070927623160e7e62723ed50bbe4a759c542:.github/workflows/docker-image.yml:generic-api-key:104
+
+9101b7f6761f4009dc925daa09ba91411675c4fd:.github/workflows/docker-image.yml:generic-api-key:104
