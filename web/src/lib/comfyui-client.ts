@@ -239,7 +239,19 @@ export function buildComfyuiWorkflow(input: ComfyuiWorkflowInput): Record<string
     if (input.durationSeconds !== undefined) set("duration", input.durationSeconds);
     if (input.width !== undefined) set("width", input.width);
     if (input.height !== undefined) set("height", input.height);
-    if (input.refImage) set("refImage", input.refImage);
+    if (input.refImage) {
+        const [refNodeId, refInputPath] = input.injection.refImage || [];
+        if (refNodeId && refInputPath) {
+            const refNode = workflow[refNodeId];
+            if (refNode && typeof refNode === "object" && (refNode as Record<string, unknown>).class_type === "LoadImage") {
+                set("refImage", input.refImage);
+            } else {
+                workflow["__vozeb_load_image"] = { class_type: "LoadImage", inputs: { image: input.refImage } };
+                const target = refNode && typeof refNode === "object" ? (refNode as { inputs?: Record<string, unknown> }).inputs : undefined;
+                if (target) target[refInputPath] = ["__vozeb_load_image", 0];
+            }
+        }
+    }
     return workflow;
 }
 
