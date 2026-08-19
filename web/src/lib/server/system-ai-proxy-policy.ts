@@ -51,7 +51,12 @@ export function authorizeSystemAiProxyRequest(input: ProxyPolicyInput): SystemAi
         return allowedTaskOperation(logical, "cancel", taskIdForAccess(cancelMatch.taskId, input.upstreamTaskIdHint));
     }
 
-    const queryPaths = [...(input.paths?.query || []), ...defaultQueryPaths(logical.capability, input.paths?.create || [], input.apiFormat)];
+    const explicitQueryPaths = [...(input.paths?.query || [])];
+    const explicitPostQueryMatch = method === "POST" ? firstPathMatch(candidates, explicitQueryPaths, upstreamModel) : null;
+    if (explicitPostQueryMatch) {
+        return allowedTaskOperation(logical, "query", taskIdForAccess(explicitPostQueryMatch.taskId, input.upstreamTaskIdHint));
+    }
+    const queryPaths = [...explicitQueryPaths, ...defaultQueryPaths(logical.capability, input.paths?.create || [], input.apiFormat)];
     const queryMatch = method === "GET" || method === "HEAD" ? firstPathMatch(candidates, queryPaths, upstreamModel) : null;
     if (queryMatch) {
         return allowedTaskOperation(logical, "query", taskIdForAccess(queryMatch.taskId, input.upstreamTaskIdHint));

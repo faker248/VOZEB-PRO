@@ -29,7 +29,7 @@ const channel = {
 describe("channel protocol registry", () => {
     it("exposes only active protocols and keeps SD2 separate from Stable Diffusion", () => {
         const protocols = channelProtocolOptions().map((item) => item.value);
-        expect(protocols).toEqual(["openai", "yumeng", "gemini", "seedance", "stable-diffusion", "volcengine-video", "sub2api", "newapi", "custom", "compatible", "auto"]);
+        expect(protocols).toEqual(["openai", "yumeng", "runninghub", "gemini", "seedance", "stable-diffusion", "volcengine-video", "sub2api", "newapi", "custom", "compatible", "auto"]);
         expect(protocols).not.toEqual(expect.arrayContaining(["vozeb-recommended", "seedance-special", "globalaiopc"]));
         expect(channelProtocolDefinition("openai").modelCatalogPaths).toEqual(["/v1/models"]);
         expect(channelProtocolDefinition("sub2api").modelCatalogPaths).toEqual(["/v1/models"]);
@@ -257,5 +257,50 @@ describe("channel protocol registry", () => {
                 "opaque",
             ),
         ).toMatchObject({ capability: "video", protocol: "custom", createPath: "/jobs" });
+    });
+});
+
+describe("runninghub protocol registration", () => {
+    it("registers the RunningHub video-only protocol with the H3 contract", () => {
+        const definition = channelProtocolDefinition("runninghub");
+        expect(definition).toMatchObject({
+            id: "runninghub",
+            label: "RunningHub",
+            apiFormat: "openai",
+            authMode: "bearer",
+            defaultBaseUrl: "https://www.runninghub.cn",
+            modelCatalogPaths: [],
+            capabilities: ["video"],
+            strict: true,
+        });
+        expect(definition.operations.video).toMatchObject({
+            capability: "video",
+            createPath: "/openapi/v2/minimax/hailuo-h3/text-to-video",
+            imageToVideoPath: "/openapi/v2/minimax/hailuo-h3/image-to-video",
+            queryPath: "/openapi/v2/query",
+            statusField: "status",
+            durationRange: "5-13 秒",
+            supportsReferenceImage: true,
+        });
+        expect(definition.builtInModels).toEqual([{ id: "hailuo-h3", label: "MiniMax H3", capability: "video" }]);
+    });
+
+    it("applies the runninghub preset to channel drafts without extra catalogs", () => {
+        const configured = applyChannelProtocol({ ...channel, baseUrl: "", models: [] }, "runninghub");
+        expect(configured.baseUrl).toBe("https://www.runninghub.cn");
+        expect(configured.models).toEqual(["hailuo-h3"]);
+        expect(configured.advancedConfig).toMatchObject({
+            protocol: "runninghub",
+            authMode: "bearer",
+            createPath: "/openapi/v2/minimax/hailuo-h3/text-to-video",
+            imageToVideoPath: "/openapi/v2/minimax/hailuo-h3/image-to-video",
+            queryPath: "/openapi/v2/query",
+            durationRange: "5-13 秒",
+            modelCatalogPaths: [],
+        });
+        expect(configured.advancedConfig?.modelCapabilities?.["hailuo-h3"]).toBe("video");
+        expect(channelProtocolValidationErrors(configured)).toEqual([]);
+        expect(protocolAuthHeaders("rh-secret", configured.advancedConfig)).toEqual({ authorization: "Bearer rh-secret" });
+        expect(channelSupportsModelCatalog(configured)).toBe(false);
     });
 });

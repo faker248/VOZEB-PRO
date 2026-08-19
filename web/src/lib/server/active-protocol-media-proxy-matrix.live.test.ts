@@ -131,7 +131,7 @@ describe("active protocols through persisted admin settings and the system proxy
 
         const created = await createUpstream("proxy-user", INTERNAL_ORIGIN, "", channel.config, "animate a blue logo", videoParameters(), [], MULTIPLIERS, `text-video-${definition.id}`);
         await expectVideoResult(channel, created);
-        expectProxyRequests(channel, operation.createPath, model, false, operation.queryPath, created.id);
+        expectProxyRequests(channel, operation.createPath, model, false, operation.queryPath, created.id, definition.id === "runninghub" ? "POST" : "GET");
 
         fixture.requests.splice(0);
         const createPath = operation.imageToVideoPath || operation.createPath;
@@ -147,7 +147,7 @@ describe("active protocols through persisted admin settings and the system proxy
             `image-video-${definition.id}`,
         );
         await expectVideoResult(channel, referenced);
-        expectProxyRequests(channel, createPath, model, true, operation.queryPath, referenced.id);
+        expectProxyRequests(channel, createPath, model, true, operation.queryPath, referenced.id, definition.id === "runninghub" ? "POST" : "GET");
     });
 
     it.each(AUDIO_PROTOCOLS)("persists and routes $id audio requests and returned media", async (definition) => {
@@ -375,9 +375,10 @@ async function expectVideoResult(channel: ProxyChannel, upstream: VideoTask["ups
     expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
 }
 
-function expectProxyRequests(channel: ProxyChannel, createPath: string | undefined, model: string, referenceRequired: boolean, queryPath?: string, taskId?: string) {
+function expectProxyRequests(channel: ProxyChannel, createPath: string | undefined, model: string, referenceRequired: boolean, queryPath?: string, taskId?: string, queryMethod: "GET" | "POST" = "GET") {
     if (!createPath) throw new Error("Protocol operation is missing createPath");
-    const createRequests = fixture.requests.filter((request) => request.method === "POST");
+    const expectedQuery = queryPath ? upstreamPath(channel.upstreamBaseUrl, queryPath.replace(":model", model).replace(":task_id", taskId || "")) : "";
+    const createRequests = fixture.requests.filter((request) => request.method === "POST" && request.path !== expectedQuery);
     expect(createRequests).toHaveLength(1);
     const request = createRequests[0]!;
     const body = request.body.toString(request.contentType.includes("multipart/form-data") ? "latin1" : "utf8");
@@ -388,7 +389,7 @@ function expectProxyRequests(channel: ProxyChannel, createPath: string | undefin
     expect(request.headers["x-client-request-id"]).toBeTruthy();
     Object.entries(channel.expectedAuthHeaders).forEach(([key, value]) => expect(request.headers[key.toLowerCase()]).toBe(value));
     expect(requestContainsReference(request)).toBe(referenceRequired);
-    if (queryPath && taskId) expect(fixture.requests.some((request) => request.method === "GET" && request.path === upstreamPath(channel.upstreamBaseUrl, queryPath.replace(":model", model).replace(":task_id", taskId)))).toBe(true);
+    if (queryPath && taskId) expect(fixture.requests.some((request) => request.method === queryMethod && request.path === expectedQuery)).toBe(true);
     expect(mocks.consumeUserPoints).toHaveBeenCalled();
 }
 

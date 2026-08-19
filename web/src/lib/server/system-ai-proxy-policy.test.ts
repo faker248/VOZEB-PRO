@@ -136,3 +136,46 @@ describe("system AI proxy policy", () => {
         ).toMatchObject({ allowed: false, status: 403 });
     });
 });
+
+describe("RunningHub POST polling authorization", () => {
+    it("allows POST polling only on the explicitly configured query path", () => {
+        const base = {
+            channelId: "main",
+            upstreamModel: "hailuo-h3",
+            logicalModels: [
+                {
+                    id: "video-pro",
+                    name: "视频",
+                    capability: "video" as const,
+                    enabled: true,
+                    bindings: [{ id: "rh-video", channelId: "main", upstreamModel: "hailuo-h3", enabled: true, priority: 1 }],
+                },
+            ],
+            apiFormat: "openai" as const,
+            paths: { query: ["/openapi/v2/query"], create: ["/openapi/v2/minimax/hailuo-h3/text-to-video"] },
+        };
+        expect(
+            authorizeSystemAiProxyRequest({
+                ...base,
+                method: "POST",
+                path: ["openapi", "v2", "query"],
+                search: "",
+                upstreamTaskIdHint: "rh-task-1",
+            }),
+        ).toMatchObject({ allowed: true, operation: "query", upstreamTaskId: "rh-task-1" });
+        expect(authorizeSystemAiProxyRequest({ ...base, method: "POST", path: ["openapi", "v2", "query"], search: "" })).toMatchObject({ allowed: false, status: 400 });
+    });
+
+    it("does not treat arbitrary POST paths as query operations", () => {
+        const base = {
+            method: "POST",
+            channelId: "main",
+            upstreamModel: "vendor-video",
+            logicalModels,
+            apiFormat: "openai" as const,
+            search: "",
+            paths: { query: ["/openapi/v2/query"] },
+        };
+        expect(authorizeSystemAiProxyRequest({ ...base, path: ["videos", "task-one"], upstreamTaskIdHint: "task-one" })).toMatchObject({ allowed: false, status: 404 });
+    });
+});

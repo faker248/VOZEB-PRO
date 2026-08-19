@@ -868,3 +868,108 @@ function geminiSettings() {
 function json(value: unknown, status = 200) {
     return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 }
+
+describe("runninghub video channel routing", () => {
+    let storedTask: Record<string, unknown> | undefined;
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.fetchInternalApi.mockReset();
+        resetChannelRuntimeHealth();
+        mocks.getAuthSettings.mockResolvedValue(rhSettings());
+        mocks.getStoredGenerationTaskByRequest.mockResolvedValue(null);
+        mocks.linkStoredGenerationTask.mockResolvedValue(undefined);
+        mocks.scheduleGenerationTask.mockResolvedValue(undefined);
+        mocks.writeVideoGenerationLog.mockResolvedValue({});
+        storedTask = undefined;
+        mocks.createVideoTask.mockImplementation(async (input) => {
+            storedTask = { ...input, id: "local-task", status: "running", createdAt: Date.now(), updatedAt: Date.now() };
+            return storedTask;
+        });
+        mocks.getVideoTask.mockImplementation(async () => storedTask);
+        mocks.updateVideoTask.mockImplementation(async (id, patch) => {
+            storedTask = { ...(storedTask || {}), ...patch };
+            return storedTask;
+        });
+        mocks.transitionVideoTask.mockImplementation(async (task, patch) => ({ ...task, ...patch }));
+        mocks.after.mockImplementation(() => undefined);
+    });
+
+    it("rejects durations above the channel cap with 400 and no upstream request", async () => {
+        mocks.fetchInternalApi.mockResolvedValue(json({ taskId: "rh-should-not-exist" }));
+        const response = await POST(request({ model: "hailuo-h3", videoSeconds: 14 }));
+        expect(response.status).toBe(400);
+        const payload = (await response.json()) as { error?: string };
+        expect(payload.error).toContain("13");
+        expect(mocks.fetchInternalApi).not.toHaveBeenCalled();
+    });
+
+    it("submits text-to-video to the H3 endpoint through the system proxy", async () => {
+        mocks.fetchInternalApi.mockResolvedValue(json({ taskId: "rh-task-1", status: "RUNNING" }));
+        const response = await POST(request({ model: "hailuo-h3", videoSeconds: 5, size: "16:9" }));
+        expect(response.status).toBe(200);
+        const payload = (await response.json()) as { task?: { upstreamId?: string } };
+        expect(payload.task?.upstreamId).toBe("rh-task-1");
+        const [url, init] = mocks.fetchInternalApi.mock.calls[0] as [string, RequestInit];
+        expect(url).toContain("/api/ai/system/rh/openapi/v2/minimax/hailuo-h3/text-to-video");
+        expect(init.method).toBe("POST");
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        expect(body).toMatchObject({ prompt: "A test video", resolution: "2K", duration: 5, ratio: "16:9" });
+    });
+
+    it("fails over with a business error when the upstream rejects the submission", async () => {
+        mocks.fetchInternalApi.mockResolvedValue(json({ code: "INSUFFICIENT_BALANCE", message: "余额不足" }, 200));
+        const response = await POST(request({ model: "hailuo-h3", videoSeconds: 5 }));
+        expect(response.status).toBe(502);
+    });
+});
+
+function rhSettings() {
+    return {
+        ...settings,
+        systemChannels: [
+            {
+                id: "rh",
+                name: "RunningHub",
+                baseUrl: "https://www.runninghub.cn",
+                apiKey: "rh-secret",
+                apiFormat: "openai" as const,
+                models: ["hailuo-h3"],
+                enabled: true,
+                advancedConfig: {
+                    protocol: "runninghub" as const,
+                    createPath: "/openapi/v2/minimax/hailuo-h3/text-to-video",
+                    imageToVideoPath: "/openapi/v2/minimax/hailuo-h3/image-to-video",
+                    queryPath: "/openapi/v2/query",
+                    statusField: "status",
+                    durationRange: "5-13 秒",
+                    supportsReferenceImage: true,
+                    modelCapabilities: { "hailuo-h3": "video" as const },
+                    modelConfigs: {
+                        "hailuo-h3": {
+                            capability: "video" as const,
+                            protocol: "runninghub" as const,
+                            apiFormat: "openai" as const,
+                            createPath: "/openapi/v2/minimax/hailuo-h3/text-to-video",
+                            imageToVideoPath: "/openapi/v2/minimax/hailuo-h3/image-to-video",
+                            queryPath: "/openapi/v2/query",
+                            statusField: "status",
+                            durationRange: "5-13 秒",
+                            supportsReferenceImage: true,
+                            resultField: "results[0].url",
+                        },
+                    },
+                },
+            },
+        ],
+        logicalModels: [
+            {
+                id: "hailuo-h3",
+                name: "MiniMax H3",
+                capability: "video" as const,
+                enabled: true,
+                bindings: [{ id: "rh-binding", channelId: "rh", upstreamModel: "hailuo-h3", enabled: true, priority: 1 }],
+            },
+        ],
+        defaultModels: { ...settings.defaultModels, videoModel: "hailuo-h3" },
+    };
+}

@@ -62,7 +62,7 @@ describe("active media protocols over TCP fixtures", () => {
         const config = videoConfig(definition.id, origin, model);
         const upstream = await createUpstream("user-live", "", "", config, "animate a blue logo", { videoSeconds: 5, size: "16:9", vquality: "720", videoGenerateAudio: false }, [], MULTIPLIERS, `video-${definition.id}`);
         await expectVideoResult(config, upstream);
-        expectVideoRequests(createPath.replace(":model", model), definition.operations.video!.queryPath!, model, upstream.id, false);
+        expectVideoRequests(createPath.replace(":model", model), definition.operations.video!.queryPath!, model, upstream.id, false, definition.id === "runninghub" ? "POST" : "GET");
     });
 
     it.each(STRICT_VIDEO_PROTOCOLS.filter((definition) => definition.operations.video?.supportsReferenceImage))("completes $id image-to-video with a transmitted reference", async (definition) => {
@@ -76,7 +76,7 @@ describe("active media protocols over TCP fixtures", () => {
         const references = [{ type: "image" as const, url: `${origin}/media/fixture.png` }];
         const upstream = await createUpstream("user-live", "", "", config, "animate the reference image", { videoSeconds: 5, size: "16:9", vquality: "720", videoGenerateAudio: false }, references, MULTIPLIERS, `image-video-${definition.id}`);
         await expectVideoResult(config, upstream);
-        expectVideoRequests(createPath.replace(":model", model), queryPath, model, upstream.id, true);
+        expectVideoRequests(createPath.replace(":model", model), queryPath, model, upstream.id, true, definition.id === "runninghub" ? "POST" : "GET");
     });
 
     it.each(ADVANCED_IMAGE_PROTOCOLS)("completes configured $id image creation", async (definition) => {
@@ -235,13 +235,13 @@ async function expectVideoResult(config: SystemGenerationChannelConfig, upstream
     expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
 }
 
-function expectVideoRequests(createPath: string, queryPath: string, model: string, taskId: string, referenceRequired: boolean) {
-    const createRequests = fixture.requests.filter((request) => request.method === "POST");
+function expectVideoRequests(createPath: string, queryPath: string, model: string, taskId: string, referenceRequired: boolean, queryMethod: "GET" | "POST" = "GET") {
+    const expectedQuery = queryPath.replace(":model", model).replace(":task_id", taskId);
+    const createRequests = fixture.requests.filter((request) => request.method === "POST" && request.path !== expectedQuery);
     expect(createRequests).toHaveLength(1);
     expect(createRequests[0]?.path).toBe(createPath);
     expect(requestContainsReference(createRequests[0]), referenceRequired ? "reference image was not transmitted to the video provider" : "text-only video request unexpectedly included a reference").toBe(referenceRequired);
-    const expectedQuery = queryPath.replace(":model", model).replace(":task_id", taskId);
-    expect(fixture.requests.some((request) => request.method === "GET" && request.path === expectedQuery)).toBe(true);
+    expect(fixture.requests.some((request) => request.method === queryMethod && request.path === expectedQuery)).toBe(true);
     expect(fixture.requests.some((request) => request.method === "GET" && request.path === "/media/fixture.mp4")).toBe(true);
 }
 

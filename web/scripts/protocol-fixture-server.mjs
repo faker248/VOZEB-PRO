@@ -14,6 +14,8 @@ const models = [
 
 const GLOBAL_AIOPC_IMAGE_PATHS = new Set(["/image2/images", "/banana/images"]);
 const YUMENG_MODEL_CENTER_TASK_PATH = "/kyyReactApiServer/v2/model-center/tasks";
+const RUNNING_HUB_CREATE_PATHS = new Set(["/openapi/v2/minimax/hailuo-h3/text-to-video", "/openapi/v2/minimax/hailuo-h3/image-to-video", "/openapi/v2/minimax/hailuo-h3/multimodal-to-video"]);
+const RUNNING_HUB_QUERY_PATH = "/openapi/v2/query";
 const GLOBAL_AIOPC_VIDEO_PATHS = new Set([
     "/sora/videos",
     "/veo/videos",
@@ -190,6 +192,22 @@ async function handleFixtureRequest({ request, response, url, body, tasks, reque
         if (!task || !String(task.kind).startsWith("yumeng-")) return sendJson(response, 404, { code: 404, message: "昱梦任务不存在" });
         const resultUrl = task.kind === "yumeng-image" ? `${url.origin}/media/fixture.png` : `${url.origin}/media/fixture.mp4`;
         return sendJson(response, 200, { task_id: id, status: "completed", result_url: resultUrl });
+    }
+    if (request.method === "POST" && RUNNING_HUB_CREATE_PATHS.has(path)) {
+        const payload = jsonBody(body);
+        if (String(payload.resolution || "") !== "2K") return sendJson(response, 400, { code: "PARAMS_INVALID", message: "resolution must be 2K" });
+        const duration = Number(payload.duration);
+        if (!Number.isFinite(duration) || duration < 1 || duration > 15) return sendJson(response, 400, { code: "PARAMS_INVALID", message: "duration must be between 1 and 15" });
+        const id = nextTaskId("runninghub-video");
+        tasks.set(id, { kind: "runninghub-video", status: "completed", payload });
+        return sendJson(response, 200, { taskId: id, status: "QUEUED" });
+    }
+    if (request.method === "POST" && path === RUNNING_HUB_QUERY_PATH) {
+        const payload = jsonBody(body);
+        const id = String(payload.taskId || "");
+        const task = tasks.get(id);
+        if (!task || !String(task.kind).startsWith("runninghub")) return sendJson(response, 404, { code: "TASK_FAILED", message: "RunningHub 任务不存在" });
+        return sendJson(response, 200, { taskId: id, status: "SUCCESS", results: [{ url: `${url.origin}/media/fixture.mp4` }], usage: { consumeMoney: "0.69" } });
     }
     if (request.method === "POST" && path === "/custom/videos") {
         const id = nextTaskId("custom-video");
