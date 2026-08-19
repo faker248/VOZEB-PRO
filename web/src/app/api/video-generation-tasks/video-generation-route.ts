@@ -88,11 +88,13 @@ export async function POST(request: Request) {
             .filter((channel) => channel.advancedConfig?.protocol === "comfyui")
             .map((channel) => {
                 const modelConfig = resolveChannelModelConfig(channel.advancedConfig, channel.model);
-                const dimensions = comfyuiVideoDimensions(normalizeVideoAspectRatio(requestedParameters.size));
+                const exact = parseImageDimensions(String(requestedParameters.size || ""));
+                const dimensions = exact || comfyuiVideoDimensions(normalizeVideoAspectRatio(requestedParameters.size));
                 return resolveComfyuiVideoGuard({
                     durationSeconds: requestedParameters.videoSeconds === -1 ? settings.generationDefaults.videoSeconds : requestedParameters.videoSeconds,
                     width: dimensions.width,
                     height: dimensions.height,
+                    vquality: String(requestedParameters.vquality || ""),
                     advancedConfig: {
                         durationRange: modelConfig?.durationRange || channel.advancedConfig?.durationRange,
                         maxDurationSeconds: channel.capabilityProfile?.maxDurationSeconds,

@@ -41,6 +41,14 @@ describe("comfyui video guard (three-layer, zero network)", () => {
         expect(resolveComfyuiVideoGuard({ durationSeconds: 5, width: 405, height: 720 })).toBeNull();
     });
 
+    it("rejects 1080p quality and exact pixel sizes above 720p", () => {
+        expect(resolveComfyuiVideoGuard({ durationSeconds: 5, width: 720, height: 405, vquality: "1080" })).toContain("720");
+        expect(resolveComfyuiVideoGuard({ durationSeconds: 5, width: 1080, height: 1080 })).toContain("720");
+        expect(resolveComfyuiVideoGuard({ durationSeconds: 5, width: 720, height: 405, vquality: "720" })).toBeNull();
+        expect(resolveComfyuiVideoGuard({ durationSeconds: 5, width: 720, height: 405, vquality: "480" })).toBeNull();
+        expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    });
+
     it("enforces the pixel-second budget (3.2 MP·s default, channel-level adjustable)", () => {
         // 720p 16:9 = 0.2916 MP；8s = 2.33 MP·s → 放行
         expect(resolveComfyuiVideoGuard({ durationSeconds: 8, width: 720, height: 405 })).toBeNull();
