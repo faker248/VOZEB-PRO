@@ -7,7 +7,8 @@ import type { RegistrationPolicyConsent } from "@/lib/registration-consent";
 import { VOZEB_QQ_GROUP_URL } from "@/constant/community";
 
 export type ApiCallFormat = "openai" | "gemini";
-export type SystemChannelProtocol = "auto" | "openai" | "yumeng" | "gemini" | "sub2api" | "newapi" | "vozeb-recommended" | "globalaiopc" | "seedance" | "stable-diffusion" | "volcengine-video" | "seedance-special" | "runninghub" | "custom" | "compatible";
+export type SystemChannelProtocol =
+    "auto" | "openai" | "yumeng" | "gemini" | "sub2api" | "newapi" | "vozeb-recommended" | "globalaiopc" | "seedance" | "stable-diffusion" | "volcengine-video" | "seedance-special" | "runninghub" | "comfyui" | "custom" | "compatible";
 export type SystemChannelAuthMode = "none" | "bearer" | "x-api-key" | "custom-header";
 
 export type SystemChannelModelConfig = {
@@ -21,6 +22,13 @@ export type SystemChannelModelConfig = {
     queryPath?: string;
     cancelPath?: string;
     cancelMethod?: "POST" | "DELETE";
+    uploadPath?: string;
+    viewPath?: string;
+    workflowTemplate?: string;
+    workflowInjection?: Record<string, [string, string]>;
+    maxPixelSeconds?: number;
+    outputNodeId?: string;
+    s3BaseUrl?: string;
     requestTemplate?: string;
     resultField?: string;
     statusField?: string;
@@ -53,6 +61,13 @@ export type SystemChannelAdvancedConfig = {
     statusField: string;
     durationRange: string;
     resolution?: string;
+    workflowTemplate?: string;
+    workflowInjection?: Record<string, [string, string]>;
+    maxPixelSeconds?: number;
+    outputNodeId?: string;
+    s3BaseUrl?: string;
+    uploadPath?: string;
+    viewPath?: string;
     referenceRule: string;
     supportsReferenceImage: boolean;
     supportsReferenceVideo: boolean;

@@ -193,6 +193,37 @@ async function handleFixtureRequest({ request, response, url, body, tasks, reque
         const resultUrl = task.kind === "yumeng-image" ? `${url.origin}/media/fixture.png` : `${url.origin}/media/fixture.mp4`;
         return sendJson(response, 200, { task_id: id, status: "completed", result_url: resultUrl });
     }
+    if (request.method === "POST" && path === "/prompt") {
+        const payload = jsonBody(body);
+        const workflow = payload.prompt && typeof payload.prompt === "object" ? payload.prompt : {};
+        const id = nextTaskId("comfyui-prompt");
+        tasks.set(id, { kind: "comfyui", status: "completed", workflow });
+        return sendJson(response, 200, { prompt_id: id, node_errors: {} });
+    }
+    const comfyuiHistoryId = path.match(/^\/history\/([^/]+)$/)?.[1];
+    if (request.method === "GET" && comfyuiHistoryId) {
+        const id = decodeURIComponent(comfyuiHistoryId);
+        const task = tasks.get(id);
+        if (!task || task.kind !== "comfyui") return sendJson(response, 404, { error: "ComfyUI prompt not found" });
+        const workflow = task.workflow || {};
+        const outputs = {};
+        for (const [nodeId, node] of Object.entries(workflow)) {
+            if (!node || typeof node !== "object" || !String(node.class_type).includes("Save")) continue;
+            const mediaKey = String(node.class_type).includes("Video") ? "gifs" : "images";
+            const filename = mediaKey === "gifs" ? "fixture.mp4" : "fixture.png";
+            outputs[nodeId] = { [mediaKey]: [{ filename, subfolder: "", type: "output" }] };
+        }
+        const entry = { status: { status_str: "success", completed: true }, outputs };
+        return sendJson(response, 200, { [id]: entry });
+    }
+    if (request.method === "GET" && path === "/view") {
+        const filename = url.searchParams.get("filename") || "";
+        if (filename.endsWith(".mp4")) return sendBytes(response, 200, "video/mp4", options.videoPath ? await readFile(options.videoPath) : FALLBACK_MP4);
+        return sendBytes(response, 200, "image/png", await fixtureImage(options));
+    }
+    if (request.method === "POST" && path === "/upload/image") {
+        return sendJson(response, 200, { name: "fixture.png", subfolder: "", type: "input" });
+    }
     if (request.method === "POST" && RUNNING_HUB_CREATE_PATHS.has(path)) {
         const payload = jsonBody(body);
         if (String(payload.resolution || "") !== "2K") return sendJson(response, 400, { code: "PARAMS_INVALID", message: "resolution must be 2K" });

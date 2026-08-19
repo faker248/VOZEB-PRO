@@ -15,6 +15,8 @@ import { systemAiBillingHeaders } from "@/lib/server/system-ai-billing";
 import { refundVideoTask } from "@/lib/server/video-task-refund";
 import { geminiVideoQueryPath, parseGeminiVideoOperation } from "@/lib/server/gemini-video-provider";
 import { parseRunningHubQueryResponse, RUNNING_HUB_QUERY_PATH } from "@/lib/runninghub-client";
+import { buildComfyuiViewUrl, parseComfyuiHistory } from "@/lib/comfyui-client";
+import { resolveChannelModelConfig } from "@/lib/channel-protocol-registry";
 
 export type VideoUpstreamStep = { state: "pending"; status: string } | { state: "result_ready"; status: string; resultUrl: string } | { state: "failed"; status: string; error: string };
 
@@ -33,6 +35,7 @@ export async function queryVideoTaskUpstream(task: VideoTask, origin: string, co
     if (task.upstream.resultUrl) return { state: "result_ready", status: "completed", resultUrl: task.upstream.resultUrl };
     if (isGeminiVideoTask(task)) return queryGeminiVideoUpstream(task, origin, cookie, workerUserId);
     if (isRunningHubVideoTask(task)) return queryRunningHubVideoUpstream(task, origin, cookie, workerUserId);
+    if (isComfyuiVideoTask(task)) return queryComfyuiVideoUpstream(task, origin, cookie, workerUserId);
     const data = await queryVideoUpstream(task, origin, cookie, workerUserId);
     const status = readVideoProviderStatus(data, task.config.advancedConfig?.statusField);
     const resultUrl = readVideoProviderUrl(data, task.config.advancedConfig?.resultField);
@@ -90,6 +93,28 @@ async function queryRunningHubVideoUpstream(task: VideoTask, origin: string, coo
         await updateVideoTask(task.id, { upstream: { ...task.upstream, usage: step.usage } }).catch(() => undefined);
     }
     return { state: "result_ready", status: step.status, resultUrl: step.resultUrl };
+}
+
+async function queryComfyuiVideoUpstream(task: VideoTask, origin: string, cookie: string, workerUserId: string): Promise<VideoUpstreamStep> {
+    const modelConfig = resolveChannelModelConfig(task.config.advancedConfig, task.config.model);
+    const outputNodeId = task.config.advancedConfig?.outputNodeId?.trim() || modelConfig?.outputNodeId || "92";
+    const base = (task.upstream.pollBaseUrl || "").replace(/\/+$/, "");
+    if (!base) throw new Error("ComfyUI 任务缺少上游地址");
+    const url = `${base}/history/${encodeURIComponent(task.upstream.id)}`;
+    const response = await fetchInternalApi(url, { headers: videoProxyHeaders(task, cookie, workerUserId), cache: "no-store", signal: AbortSignal.timeout(Math.min(resolveModelRequestTimeoutMs(task.config, "video"), 60_000)) });
+    const text = await response.text();
+    if (!response.ok) throw new Error(readVideoProviderHttpError(text, response.status));
+    let data: unknown;
+    try {
+        data = parseVideoProviderJson(text);
+    } catch (error) {
+        throw error instanceof Error ? error : new Error("ComfyUI 查询接口返回了无效 JSON");
+    }
+    const step = parseComfyuiHistory(data, task.upstream.id, outputNodeId);
+    if (step.state === "pending") return { state: "pending", status: "processing" };
+    if (step.state === "failed") return { state: "failed", status: "error", error: step.error };
+    const file = step.files[0];
+    return { state: "result_ready", status: "completed", resultUrl: base + buildComfyuiViewUrl(file) };
 }
 
 export async function persistVideoTaskResult(task: VideoTask, resultUrl: string, origin: string, cookie = "", workerUserId = "") {
@@ -258,4 +283,8 @@ function isGeminiVideoTask(task: VideoTask) {
 
 function isRunningHubVideoTask(task: VideoTask) {
     return task.config.advancedConfig?.protocol === "runninghub";
+}
+
+function isComfyuiVideoTask(task: VideoTask) {
+    return task.config.advancedConfig?.protocol === "comfyui";
 }

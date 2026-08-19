@@ -2,6 +2,7 @@ import type { LogicalModel, LogicalModelCapability, PointUsageKind } from "@/lib
 
 type ProxyPathSet = {
     create?: Array<string | undefined>;
+    upload?: Array<string | undefined>;
     query?: Array<string | undefined>;
     cancel?: Array<{ path?: string; method?: string }>;
 };
@@ -64,6 +65,9 @@ export function authorizeSystemAiProxyRequest(input: ProxyPolicyInput): SystemAi
 
     const createPaths = [...(input.paths?.create || []), ...standardCreatePaths(logical.capability, input.apiFormat)];
     if (method === "POST" && createPaths.some((path) => pathMatchesAny(candidates, path, upstreamModel))) {
+        if (input.paths?.upload?.some((path) => pathMatchesAny(candidates, path, upstreamModel))) {
+            return allowed(logical, "create");
+        }
         if (!input.pointsUsageKind || input.pointsUsageKind === "api") return denied(400, "系统模型创建请求无法确定计费类型");
         if (input.pointsUsageKind !== logical.capability) return denied(403, "请求能力与逻辑模型不匹配");
         return allowed(logical, "create");

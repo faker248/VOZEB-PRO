@@ -1,6 +1,8 @@
 import type { ImageTask } from "@/lib/server/image-task-store";
 import { GenerationSubmissionSafeFailure, GenerationSubmissionUncertainError } from "@/lib/server/generation-submission-error";
 import { buildProviderRequest, isProviderBusinessError, readProviderError, readProviderString } from "@/lib/server/provider-task-config";
+import { buildComfyuiPromptRequest, buildComfyuiViewUrl, parseComfyuiHistory, parseComfyuiPromptResponse, resolveComfyuiS3Url, COMFYUI_DEFAULT_INJECTION_SANCAI } from "@/lib/comfyui-client";
+import { resolveChannelModelConfig } from "@/lib/channel-protocol-registry";
 import { buildYumengImageRequest, resolveYumengImageResolution } from "@/lib/yumeng-model-center";
 
 import { publicImageReferenceRequestUrl } from "./image-task-openai";
@@ -112,3 +114,94 @@ function configuredImageResult(data: ImageApiResponse, baseUrl: string, task: Im
 }
 
 const STATUS_KEYS = ["status", "state", "task_status", "taskStatus"];
+
+export async function runComfyuiImageTask(task: ImageTask, origin: string, publicOrigin: string, cookie: string, singleStep = false) {
+    const config = task.config;
+    const advanced = config.advancedConfig;
+    const modelConfig = resolveChannelModelConfig(advanced, config.model);
+    const workflowTemplate = textOrEmpty(advanced?.workflowTemplate) || textOrEmpty(modelConfig?.workflowTemplate);
+    if (!workflowTemplate) throw new GenerationSubmissionSafeFailure("ComfyUI 渠道缺少工作流模板");
+    let workflow: Record<string, unknown>;
+    try {
+        workflow = JSON.parse(workflowTemplate) as Record<string, unknown>;
+    } catch {
+        throw new GenerationSubmissionSafeFailure("ComfyUI 工作流模板不是合法 JSON");
+    }
+    const injection = advanced?.workflowInjection || modelConfig?.workflowInjection || COMFYUI_DEFAULT_INJECTION_SANCAI;
+    const clientId = `vozeb-image-${task.id.slice(0, 48)}`;
+    let refImage = "";
+    if (task.references.length) {
+        const reference = task.references[0];
+        const dataUrl = await imageReferenceToDataUrl(reference, reference.name || "reference.png", origin, cookie);
+        if (!dataUrl) throw new GenerationSubmissionSafeFailure("ComfyUI 参考图无法读取");
+        const uploadPath = textOrEmpty(modelConfig?.uploadPath) || textOrEmpty(advanced?.uploadPath) || "/upload/image";
+        const uploadUrl = taskUrl(config, uploadPath, origin);
+        const form = new FormData();
+        const blob = await (await fetch(dataUrl)).blob();
+        form.append("image", blob, reference.name || "reference.png");
+        form.append("overwrite", "true");
+        const uploadResponse = await taskFetch(config, uploadUrl, { method: "POST", headers: taskHeaders(config, cookie), body: form });
+        if (!uploadResponse.ok) throw new GenerationSubmissionSafeFailure(await readFetchError(uploadResponse, "ComfyUI 参考图上传失败"));
+        const uploaded = (await uploadResponse.json().catch(() => ({}))) as { name?: string };
+        if (!uploaded.name) throw new GenerationSubmissionSafeFailure("ComfyUI 参考图上传没有返回文件名");
+        refImage = uploaded.name;
+    }
+    const built = buildComfyuiPromptRequest({ workflow, injection, clientId, prompt: withSystemPrompt(config, task.prompt), refImage: refImage || undefined });
+    const createPath = textOrEmpty(modelConfig?.createPath) || textOrEmpty(advanced?.createPath) || "/prompt";
+    const url = taskUrl(config, createPath, origin);
+    const headers = taskHeaders(config, cookie, imagePointsIdempotencyKey(task));
+    headers.set("content-type", "application/json");
+    const response = await imageSubmissionFetch(config, url, { method: "POST", headers, body: JSON.stringify(built.body), cache: "no-store" });
+    if (!response.ok) throw imageSubmissionResponseError(response.status, await readFetchError(response, "ComfyUI 提交失败"));
+    const data = await parseImageSubmissionJson<unknown>(response);
+    const parsed = parseComfyuiPromptResponse(data);
+    if ("failure" in parsed) throw new GenerationSubmissionUncertainError(parsed.failure);
+    const baseUrl = comfyuiUpstreamOrigin(response.headers.get("x-vozeb-pro-upstream-url") || url);
+    if (singleStep) return { dataUrl: "", pending: { id: parsed.promptId, mediaBaseUrl: baseUrl, pollBaseUrl: baseUrl } };
+    return pollComfyuiImageTask(task, parsed.promptId, baseUrl, cookie);
+}
+
+export async function pollComfyuiImageTask(task: ImageTask, promptId: string, requestUrl: string, cookie: string, singleStep = false) {
+    const config = task.config;
+    const advanced = config.advancedConfig;
+    const modelConfig = resolveChannelModelConfig(advanced, config.model);
+    const outputNodeId = textOrEmpty(advanced?.outputNodeId) || textOrEmpty(modelConfig?.outputNodeId) || "49";
+    const url = `${requestUrl.replace(/\/+$/, "")}/history/${encodeURIComponent(promptId)}`;
+    const response = await taskFetch(config, url, { headers: taskHeaders(config, cookie), cache: "no-store" });
+    if (!response.ok) throw new ImageUpstreamTerminalError((await readFetchError(response, "ComfyUI 查询失败")) || "ComfyUI 查询失败");
+    const data = parseComfyuiHistory(await response.json().catch(() => ({})), promptId, outputNodeId);
+    if (data.state === "pending") return { dataUrl: "", pending: { id: promptId, mediaBaseUrl: requestUrl, pollBaseUrl: requestUrl } };
+    if (data.state === "failed") throw new ImageUpstreamTerminalError(data.error);
+    const file = data.files[0];
+    const resultUrl = await resolveComfyuiImageResultUrl(config, modelConfig, requestUrl, file);
+    return (
+        findImageResult(resultUrl, requestUrl, config) ||
+        (() => {
+            throw new ImageUpstreamTerminalError("ComfyUI 任务完成但没有返回图片");
+        })()
+    );
+}
+
+async function resolveComfyuiImageResultUrl(config: ImageTask["config"], modelConfig: ReturnType<typeof resolveChannelModelConfig>, requestUrl: string, file: { filename: string; subfolder: string; type: string }) {
+    const s3BaseUrl = textOrEmpty(config.advancedConfig?.s3BaseUrl) || textOrEmpty(modelConfig?.s3BaseUrl);
+    if (s3BaseUrl) {
+        const estimated = resolveComfyuiS3Url({ filename: file.filename, s3BaseUrl });
+        if (estimated) {
+            const head = await fetch(estimated, { method: "HEAD", signal: AbortSignal.timeout(5_000) }).catch(() => null);
+            if (head?.ok) return estimated;
+        }
+    }
+    return `${requestUrl.replace(/\/+$/, "")}${buildComfyuiViewUrl(file)}`;
+}
+
+function comfyuiUpstreamOrigin(url: string) {
+    try {
+        return new URL(url).origin;
+    } catch {
+        return url.replace(/\/+$/, "");
+    }
+}
+
+function textOrEmpty(value: unknown) {
+    return typeof value === "string" ? value.trim() : "";
+}

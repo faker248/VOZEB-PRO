@@ -29,7 +29,7 @@ const channel = {
 describe("channel protocol registry", () => {
     it("exposes only active protocols and keeps SD2 separate from Stable Diffusion", () => {
         const protocols = channelProtocolOptions().map((item) => item.value);
-        expect(protocols).toEqual(["openai", "yumeng", "runninghub", "gemini", "seedance", "stable-diffusion", "volcengine-video", "sub2api", "newapi", "custom", "compatible", "auto"]);
+        expect(protocols).toEqual(["openai", "yumeng", "runninghub", "comfyui", "gemini", "seedance", "stable-diffusion", "volcengine-video", "sub2api", "newapi", "custom", "compatible", "auto"]);
         expect(protocols).not.toEqual(expect.arrayContaining(["vozeb-recommended", "seedance-special", "globalaiopc"]));
         expect(channelProtocolDefinition("openai").modelCatalogPaths).toEqual(["/v1/models"]);
         expect(channelProtocolDefinition("sub2api").modelCatalogPaths).toEqual(["/v1/models"]);
@@ -301,6 +301,40 @@ describe("runninghub protocol registration", () => {
         expect(configured.advancedConfig?.modelCapabilities?.["hailuo-h3"]).toBe("video");
         expect(channelProtocolValidationErrors(configured)).toEqual([]);
         expect(protocolAuthHeaders("rh-secret", configured.advancedConfig)).toEqual({ authorization: "Bearer rh-secret" });
+        expect(channelSupportsModelCatalog(configured)).toBe(false);
+    });
+});
+
+describe("comfyui protocol registration", () => {
+    it("registers the ComfyUI protocol with built-in workflow templates", () => {
+        const definition = channelProtocolDefinition("comfyui");
+        expect(definition).toMatchObject({
+            id: "comfyui",
+            label: "ComfyUI",
+            apiFormat: "openai",
+            authMode: "none",
+            defaultBaseUrl: "http://host.docker.internal:8188",
+            modelCatalogPaths: [],
+            capabilities: ["image", "video"],
+            strict: true,
+        });
+        expect(definition.builtInModels).toEqual([
+            { id: "krea2-zit-flux2-klein", label: expect.any(String), capability: "image", operation: expect.any(Object) },
+            { id: "minimax-h3-r2v", label: expect.any(String), capability: "video", operation: expect.any(Object) },
+        ]);
+        expect(definition.operations.image).toMatchObject({ createPath: "/prompt", uploadPath: "/upload/image", queryPath: "/history/:task_id", viewPath: "/view", outputNodeId: "49", supportsReferenceImage: true });
+        expect(definition.operations.video).toMatchObject({ createPath: "/prompt", queryPath: "/history/:task_id", outputNodeId: "92", durationRange: "5-13 秒", maxPixelSeconds: 3.2, supportsReferenceImage: true });
+    });
+
+    it("applies the comfyui preset with template and injection defaults", () => {
+        const configured = applyChannelProtocol({ ...channel, baseUrl: "", models: [] }, "comfyui");
+        expect(configured.baseUrl).toBe("http://host.docker.internal:8188");
+        expect(configured.models).toEqual(["krea2-zit-flux2-klein", "minimax-h3-r2v"]);
+        expect(configured.advancedConfig?.modelConfigs?.["krea2-zit-flux2-klein"]).toMatchObject({ capability: "image", protocol: "comfyui", createPath: "/prompt", outputNodeId: "49" });
+        expect(configured.advancedConfig?.modelConfigs?.["minimax-h3-r2v"]).toMatchObject({ capability: "video", protocol: "comfyui", durationRange: "5-13 秒", maxPixelSeconds: 3.2 });
+        expect(configured.advancedConfig?.modelConfigs?.["krea2-zit-flux2-klein"].workflowTemplate).toContain("{{prompt}}");
+        expect(channelProtocolValidationErrors(configured)).toEqual([]);
+        expect(protocolAuthHeaders("secret", configured.advancedConfig)).toEqual({});
         expect(channelSupportsModelCatalog(configured)).toBe(false);
     });
 });

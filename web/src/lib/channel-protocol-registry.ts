@@ -3,6 +3,7 @@ import { inferModelCapability, normalizeModelId } from "@/lib/model-capability";
 import { SEEDANCE_SPECIAL_MODELS } from "@/lib/seedance-special";
 import { normalizeYumengModelCenterBaseUrl, YUMENG_DEFAULT_IMAGE_OPERATION, YUMENG_DEFAULT_VIDEO_OPERATION, YUMENG_MODEL_CENTER_BASE_URL, YUMENG_MODEL_CENTER_MODELS } from "@/lib/yumeng-model-center";
 import { RUNNING_HUB_BASE_URL, RUNNING_HUB_MODELS, RUNNING_HUB_QUERY_PATH, RUNNING_HUB_VIDEO_ENDPOINTS } from "@/lib/runninghub-client";
+import { COMFYUI_DEFAULT_INJECTION_H3, COMFYUI_DEFAULT_INJECTION_SANCAI, COMFYUI_H3_WORKFLOW, COMFYUI_SANCAI_WORKFLOW } from "@/lib/comfyui-client";
 
 type ProtocolOperation = Omit<SystemChannelModelConfig, "capability" | "source" | "protocol" | "apiFormat"> & {
     capability: LogicalModelCapability;
@@ -21,6 +22,42 @@ export type ChannelProtocolDefinition = {
     builtInModels?: ReadonlyArray<{ id: string; label: string; capability: LogicalModelCapability; operation?: ProtocolOperation }>;
     strict?: boolean;
     advanced?: boolean;
+};
+
+const comfySancaiOperation: ProtocolOperation = {
+    capability: "image",
+    createPath: "/prompt",
+    uploadPath: "/upload/image",
+    queryPath: "/history/:task_id",
+    viewPath: "/view",
+    resultField: "outputs 动态键（驱动解析）",
+    statusField: "status.status_str",
+    outputNodeId: "49",
+    workflowTemplate: JSON.stringify(COMFYUI_SANCAI_WORKFLOW),
+    workflowInjection: COMFYUI_DEFAULT_INJECTION_SANCAI,
+    s3BaseUrl: "",
+    supportsReferenceImage: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
+};
+
+const comfyH3Operation: ProtocolOperation = {
+    capability: "video",
+    createPath: "/prompt",
+    uploadPath: "/upload/image",
+    queryPath: "/history/:task_id",
+    viewPath: "/view",
+    resultField: "outputs 动态键（驱动解析）",
+    statusField: "status.status_str",
+    outputNodeId: "92",
+    durationRange: "5-13 秒",
+    workflowTemplate: JSON.stringify(COMFYUI_H3_WORKFLOW),
+    workflowInjection: COMFYUI_DEFAULT_INJECTION_H3,
+    maxPixelSeconds: 3.2,
+    s3BaseUrl: "",
+    supportsReferenceImage: true,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
 };
 
 const openAiOperations: ChannelProtocolDefinition["operations"] = {
@@ -170,6 +207,22 @@ export const registeredChannelProtocolDefinitions: ChannelProtocolDefinition[] =
                 supportsReferenceAudio: true,
             },
         },
+        strict: true,
+    },
+    {
+        id: "comfyui",
+        label: "ComfyUI",
+        description: "ComfyUI 原生协议：POST /prompt 提交工作流，GET /history/{prompt_id} 轮询，产物经 /view 或 S3 推定下载。",
+        apiFormat: "openai",
+        authMode: "none",
+        defaultBaseUrl: "http://host.docker.internal:8188",
+        modelCatalogPaths: [],
+        capabilities: ["image", "video"],
+        builtInModels: [
+            { id: "krea2-zit-flux2-klein", label: "三采极致图（Krea2+ZIT+Flux2-Klein）", capability: "image", operation: comfySancaiOperation },
+            { id: "minimax-h3-r2v", label: "MiniMax H3 图生视频（本地 3090）", capability: "video", operation: comfyH3Operation },
+        ],
+        operations: { image: comfySancaiOperation, video: comfyH3Operation },
         strict: true,
     },
     {

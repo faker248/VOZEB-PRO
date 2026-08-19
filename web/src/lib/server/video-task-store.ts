@@ -23,6 +23,7 @@ export type VideoTask = GenerationTaskContext & {
         model: string;
         pollPath?: string;
         queryPath?: string;
+        pollBaseUrl?: string;
         resultUrl?: string;
         pointsCost?: number;
         pointsUnits?: number;
