@@ -122,6 +122,21 @@ describe("comfyui history parsing and result urls", () => {
     });
 });
 
+describe("comfyui S3 save node fallback", () => {
+    it("rewrites SaveImageS3 nodes to SaveImage in submitted workflows", () => {
+        const built = buildComfyuiWorkflow({
+            workflow: { "49": { class_type: "SaveImageS3", inputs: { filename_prefix: "【屿僳】终版", images: ["45", 0] } }, "45": { class_type: "ImageScaleBy", inputs: {} } },
+            injection: {},
+            prompt: "p",
+        });
+        expect(built["49"]).toMatchObject({ class_type: "SaveImage", inputs: { filename_prefix: "【屿僳】终版" } });
+        // 非 S3 保存节点不动
+        expect(built["45"]).toMatchObject({ class_type: "ImageScaleBy" });
+        // 模板本体不被修改
+        expect((COMFYUI_SANCAI_WORKFLOW as Record<string, { class_type?: string }>)["49"].class_type).toBe("SaveImageS3");
+    });
+});
+
 describe("comfyui constants", () => {
     it("documents the confirmed red lines", () => {
         expect(COMFYUI_MAX_DURATION_SECONDS).toBe(13);
