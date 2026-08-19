@@ -51,10 +51,7 @@ jobs:
       - run: pnpm run build
         env:
           NEXT_SKIP_BUILD_TYPECHECK: "1"
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm run e2e
-        env:
-          VOZEB_PRO_E2E_DATABASE_URL: postgres://vozeb:vozeb-e2e-password@127.0.0.1:5432/vozeb_pro_e2e
+      # 浏览器 E2E 已解耦到独立 e2e job（runner 网络抖动时不再阻塞镜像构建）
       - name: PostgreSQL integration tests
         run: >-
           pnpm exec vitest run --no-file-parallelism
@@ -68,6 +65,42 @@ jobs:
           VOZEB_PRO_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
           VOZEB_PRO_RUN_POSTGRES_INTEGRATION: "1"
           RUN_WORK_COMMUNITY_POSTGRES_INTEGRATION: "1"
+
+  e2e:
+    needs: quality
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.6-alpine
+        env:
+          POSTGRES_DB: vozeb_pro_e2e
+          POSTGRES_USER: vozeb
+          POSTGRES_PASSWORD: vozeb-e2e-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vozeb -d vozeb_pro_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run e2e
+        env:
+          VOZEB_PRO_E2E_DATABASE_URL: postgres://vozeb:vozeb-e2e-password@127.0.0.1:5432/vozeb_pro_e2e
 
   security:
     runs-on: ubuntu-latest
