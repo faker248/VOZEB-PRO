@@ -135,7 +135,7 @@ export function readRunningHubUsage(data: unknown): RunningHubUsage {
     const raw = usage.consumeMoney ?? usage.thirdPartyConsumeMoney;
     if (raw === undefined || raw === null || raw === "") return {};
     const consumeMoney = Number(raw);
-    return Number.isFinite(consumeMoney) && consumeMoney >= 0 ? { consumeMoney, currency: "CNY" } : {};
+    return Number.isFinite(consumeMoney) && consumeMoney >= 0 ? { consumeMoney } : {};
 }
 
 export function runningHubFailureMessage(data: unknown): string {

@@ -166,10 +166,10 @@ describe("runninghub client response parsing", () => {
     });
 
     it("reads billing from consumeMoney with thirdPartyConsumeMoney fallback", () => {
-        expect(readRunningHubUsage({ usage: { consumeMoney: "0.69" } }).consumeMoney).toBe(0.69);
-        expect(readRunningHubUsage({ usage: { thirdPartyConsumeMoney: "0.2" } }).consumeMoney).toBe(0.2);
-        expect(readRunningHubUsage({ usage: { consumeMoney: 0 } }).consumeMoney).toBe(0);
-        expect(readRunningHubUsage({}).consumeMoney).toBeUndefined();
+        expect(readRunningHubUsage({ usage: { consumeMoney: "0.69" } })).toEqual({ consumeMoney: 0.69 });
+        expect(readRunningHubUsage({ usage: { thirdPartyConsumeMoney: "0.2" } })).toEqual({ consumeMoney: 0.2 });
+        expect(readRunningHubUsage({ usage: { consumeMoney: 0 } })).toEqual({ consumeMoney: 0 });
+        expect(readRunningHubUsage({})).toEqual({});
     });
 });
 
