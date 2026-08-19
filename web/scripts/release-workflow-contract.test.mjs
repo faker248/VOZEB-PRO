@@ -41,7 +41,7 @@ describe("release workflow contract", () => {
 
     it.each([
         ["quality.yml", "web"],
-        ["docker-image.yml", "quality"],
+        ["docker-image.yml", "e2e"],
     ])("serializes shared PostgreSQL integration tests in %s", (file, job) => {
         const document = parseDocument(workflow(file));
         expect(document.errors).toEqual([]);
