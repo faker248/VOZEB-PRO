@@ -291,6 +291,7 @@ export async function createUpstream(
                   prompt,
                   durationSeconds: values.duration as number,
                   aspectRatio: values.aspect_ratio as string,
+                  resolution: channel.advancedConfig?.resolution || undefined,
                   firstFrameUrl: firstFrameUrl || undefined,
                   lastFrameUrl: lastFrameUrl || undefined,
                   images: requestImages,

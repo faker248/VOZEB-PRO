@@ -52,6 +52,7 @@ export type SystemChannelAdvancedConfig = {
     resultField: string;
     statusField: string;
     durationRange: string;
+    resolution?: string;
     referenceRule: string;
     supportsReferenceImage: boolean;
     supportsReferenceVideo: boolean;
