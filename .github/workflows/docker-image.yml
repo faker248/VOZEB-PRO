@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: ghcr.io/csyqlz/vozeb-pro
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/vozeb-pro
 
 jobs:
   quality:
@@ -103,6 +103,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/VOZEB-PRO-v') }}
             type=ref,event=tag
+            type=ref,event=branch
             type=sha,prefix=
 
   build:

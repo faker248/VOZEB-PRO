@@ -17,7 +17,19 @@ export type VideoTask = GenerationTaskContext & {
     createdAt: number;
     updatedAt: number;
     config: SystemGenerationChannelConfig;
-    upstream: { id: string; provider: "openai" | "seedance" | "generation"; model: string; pollPath?: string; queryPath?: string; resultUrl?: string; pointsCost?: number; pointsUnits?: number; pointsRecordId?: string; refunded?: boolean };
+    upstream: {
+        id: string;
+        provider: "openai" | "seedance" | "generation";
+        model: string;
+        pollPath?: string;
+        queryPath?: string;
+        resultUrl?: string;
+        pointsCost?: number;
+        pointsUnits?: number;
+        pointsRecordId?: string;
+        refunded?: boolean;
+        usage?: { consumeMoney?: number; currency?: string };
+    };
     requestedDurationSeconds?: number;
     source?: string;
     prompt?: string;

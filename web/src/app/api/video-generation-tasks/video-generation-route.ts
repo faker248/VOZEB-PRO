@@ -31,6 +31,7 @@ import { writeVideoGenerationLog } from "@/lib/server/video-task-log";
 import { buildOpenAiVideoFormData } from "./video-task-openai";
 import { normalizeVideoGenerationReferences, regularVideoReferences, videoFrameReferences, type VideoGenerationReference } from "@/lib/video-reference-contract";
 import { assertYumengVideoReferences, buildYumengVideoRequest } from "@/lib/yumeng-model-center";
+import { buildRunningHubVideoRequest, parseRunningHubCreateResponse, runningHubVideoRejection, RUNNING_HUB_QUERY_PATH } from "@/lib/runninghub-client";
 
 const CREATE_PATHS = ["/video/generations", "/videos/generations", "/videos/videos", "/videos"];
 type CreateVideoTaskBody = { config?: Record<string, unknown>; prompt?: string; references?: VideoGenerationReference[]; source?: string; context?: GenerationTaskContext };
@@ -76,6 +77,11 @@ export async function POST(request: Request) {
         const cookie = requestRuntimeCredential(request, user.id);
         const requestedParameters = resolveVideoGenerationParameters(body.config || {}, settings.generationDefaults);
         const billingRequestId = clean(body.context?.clientRequestId) || clean(request.headers.get("x-vozeb-pro-client-request-id")) || `video-request:${user.id}:${Date.now()}`;
+        const runningHubRejection = channels
+            .filter((channel) => channel.advancedConfig?.protocol === "runninghub")
+            .map((channel) => runningHubVideoRejection({ advancedConfig: channel.advancedConfig, capabilityProfile: channel.capabilityProfile, videoSeconds: requestedParameters.videoSeconds }))
+            .find(Boolean);
+        if (runningHubRejection) return NextResponse.json({ error: runningHubRejection, canRetry: false }, { status: 400 });
         let lastError: unknown;
         let capabilityError: unknown;
         let attempts: GenerationAttempt[] = [];
@@ -279,65 +285,82 @@ export async function createUpstream(
         ...(lastFrameUrl ? { last_frame: lastFrameUrl, last_frame_url: lastFrameUrl } : {}),
     };
     const globalPreset = globalAiOpcVideoPreset(channel.advancedConfig, channel.model);
+    const runningHubRequest =
+        channel.advancedConfig?.protocol === "runninghub"
+            ? buildRunningHubVideoRequest({
+                  prompt,
+                  durationSeconds: values.duration as number,
+                  aspectRatio: values.aspect_ratio as string,
+                  firstFrameUrl: firstFrameUrl || undefined,
+                  lastFrameUrl: lastFrameUrl || undefined,
+                  images: requestImages,
+                  videos,
+                  audios,
+                  advancedConfig: channel.advancedConfig,
+                  capabilityProfile: channel.capabilityProfile,
+              })
+            : null;
     const multipart = channel.advancedConfig?.requestTemplate?.trim().toLowerCase().startsWith("multipart/form-data") === true;
     const payload = multipart
         ? undefined
-        : channel.advancedConfig?.protocol === "vozeb-recommended"
-          ? buildVozebRecommendedVideoRequest({
-                model: channel.model,
-                prompt,
-                duration: values.duration as number,
-                aspectRatio: values.aspect_ratio as string,
-                resolution: values.resolution as string,
-                generateAudio,
-                images,
-                videos,
-                audios,
-            })
-          : channel.advancedConfig?.protocol === "seedance-special"
-            ? buildSeedanceSpecialRequest({
+        : runningHubRequest
+          ? runningHubRequest.body
+          : channel.advancedConfig?.protocol === "vozeb-recommended"
+            ? buildVozebRecommendedVideoRequest({
                   model: channel.model,
                   prompt,
-                  duration: values.duration === -1 ? 5 : (values.duration as number),
-                  ratio: values.ratio as string,
+                  duration: values.duration as number,
+                  aspectRatio: values.aspect_ratio as string,
+                  resolution: values.resolution as string,
                   generateAudio,
-                  references,
+                  images,
+                  videos,
+                  audios,
               })
-            : channel.advancedConfig?.protocol === "yumeng"
-              ? buildYumengVideoRequest({
+            : channel.advancedConfig?.protocol === "seedance-special"
+              ? buildSeedanceSpecialRequest({
                     model: channel.model,
                     prompt,
-                    duration: values.duration as number,
-                    aspectRatio: values.aspect_ratio as string,
-                    resolution: values.resolution as string,
+                    duration: values.duration === -1 ? 5 : (values.duration as number),
+                    ratio: values.ratio as string,
                     generateAudio,
-                    watermark: raw.videoWatermark === "true",
-                    images: requestImages,
-                    videos,
-                    audios,
-                    firstFrame: firstFrameUrl || undefined,
-                    lastFrame: lastFrameUrl || undefined,
+                    references,
                 })
-              : globalPreset
-                ? buildGlobalAiOpcVideoRequest(globalPreset, {
+              : channel.advancedConfig?.protocol === "yumeng"
+                ? buildYumengVideoRequest({
                       model: channel.model,
                       prompt,
                       duration: values.duration as number,
-                      ratio: values.ratio as string,
+                      aspectRatio: values.aspect_ratio as string,
                       resolution: values.resolution as string,
-                      images: requestImages.length ? requestImages : requestImage ? [requestImage] : [],
+                      generateAudio,
+                      watermark: raw.videoWatermark === "true",
+                      images: requestImages,
                       videos,
                       audios,
-                      generateAudio,
                       firstFrame: firstFrameUrl || undefined,
                       lastFrame: lastFrameUrl || undefined,
                   })
-                : buildVideoProviderRequest(channel.advancedConfig?.requestTemplate, defaults, values);
+                : globalPreset
+                  ? buildGlobalAiOpcVideoRequest(globalPreset, {
+                        model: channel.model,
+                        prompt,
+                        duration: values.duration as number,
+                        ratio: values.ratio as string,
+                        resolution: values.resolution as string,
+                        images: requestImages.length ? requestImages : requestImage ? [requestImage] : [],
+                        videos,
+                        audios,
+                        generateAudio,
+                        firstFrame: firstFrameUrl || undefined,
+                        lastFrame: lastFrameUrl || undefined,
+                    })
+                  : buildVideoProviderRequest(channel.advancedConfig?.requestTemplate, defaults, values);
     const requestBody = multipart
         ? await buildOpenAiVideoFormData({ model: channel.model, prompt, seconds: values.seconds as number, width: dimensions.width, height: dimensions.height, imageUrls: firstFrameUrl ? [firstFrameUrl] : images, origin, cookie })
         : JSON.stringify(payload);
     const imageToVideoPath = images.length || firstFrameUrl ? channel.advancedConfig?.imageToVideoPath?.trim() : "";
-    const createPaths = globalPreset ? [globalPreset.createPath] : imageToVideoPath ? [imageToVideoPath] : resolvedProviderCreatePaths(channel.advancedConfig, "video", CREATE_PATHS);
+    const createPaths = runningHubRequest ? [runningHubRequest.endpoint] : globalPreset ? [globalPreset.createPath] : imageToVideoPath ? [imageToVideoPath] : resolvedProviderCreatePaths(channel.advancedConfig, "video", CREATE_PATHS);
     for (const path of createPaths) {
         const response = await proxyFetch(origin, channel.baseUrl, path, cookie, {
             method: "POST",
@@ -366,6 +389,26 @@ export async function createUpstream(
             throw error instanceof Error ? error : new Error("视频接口返回了无效 JSON");
         }
         const providerError = readProviderError(data);
+        if (runningHubRequest) {
+            const pointsCost = billedPointsCost(response.headers.get("x-vozeb-pro-points-cost"));
+            const pointsRecordId = response.headers.get("x-vozeb-pro-points-record-id") || undefined;
+            const parsed = parseRunningHubCreateResponse(data);
+            if ("failure" in parsed) {
+                if (pointsCost !== undefined && pointsRecordId) await refundUserPoints(userId, generationModelId(channel), pointsCost, "video", videoUnits(raw, multipliers), undefined, pointsRecordId);
+                throw new SafeCandidateFailure(parsed.failure);
+            }
+            return {
+                id: parsed.taskId,
+                provider: "generation" as const,
+                model: channel.model,
+                pollPath: runningHubRequest.endpoint,
+                queryPath: RUNNING_HUB_QUERY_PATH,
+                resultUrl: parsed.resultUrl || undefined,
+                pointsCost,
+                pointsUnits: videoUnits(raw, multipliers),
+                pointsRecordId,
+            };
+        }
         if (isProviderBusinessError(data)) {
             const pointsCost = billedPointsCost(response.headers.get("x-vozeb-pro-points-cost"));
             const pointsRecordId = response.headers.get("x-vozeb-pro-points-record-id") || undefined;

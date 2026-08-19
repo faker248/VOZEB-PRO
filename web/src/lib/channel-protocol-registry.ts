@@ -2,6 +2,7 @@ import type { ApiCallFormat, LogicalModelCapability, SystemChannelAdvancedConfig
 import { inferModelCapability, normalizeModelId } from "@/lib/model-capability";
 import { SEEDANCE_SPECIAL_MODELS } from "@/lib/seedance-special";
 import { normalizeYumengModelCenterBaseUrl, YUMENG_DEFAULT_IMAGE_OPERATION, YUMENG_DEFAULT_VIDEO_OPERATION, YUMENG_MODEL_CENTER_BASE_URL, YUMENG_MODEL_CENTER_MODELS } from "@/lib/yumeng-model-center";
+import { RUNNING_HUB_BASE_URL, RUNNING_HUB_MODELS, RUNNING_HUB_QUERY_PATH, RUNNING_HUB_VIDEO_ENDPOINTS } from "@/lib/runninghub-client";
 
 type ProtocolOperation = Omit<SystemChannelModelConfig, "capability" | "source" | "protocol" | "apiFormat"> & {
     capability: LogicalModelCapability;
@@ -142,6 +143,33 @@ export const registeredChannelProtocolDefinitions: ChannelProtocolDefinition[] =
         builtInModels: YUMENG_MODEL_CENTER_MODELS,
         capabilities: ["image", "video"],
         operations: { image: YUMENG_DEFAULT_IMAGE_OPERATION, video: YUMENG_DEFAULT_VIDEO_OPERATION },
+        strict: true,
+    },
+    {
+        id: "runninghub",
+        label: "RunningHub",
+        description: "RunningHub 开放平台视频协议（MiniMax H3）：POST /openapi/v2/{endpoint} 提交，Bearer 鉴权，POST /openapi/v2/query 轮询。",
+        apiFormat: "openai",
+        authMode: "bearer",
+        defaultBaseUrl: RUNNING_HUB_BASE_URL,
+        modelCatalogPaths: [],
+        builtInModels: RUNNING_HUB_MODELS,
+        capabilities: ["video"],
+        operations: {
+            video: {
+                capability: "video",
+                createPath: "/openapi/v2/" + RUNNING_HUB_VIDEO_ENDPOINTS["text-to-video"],
+                imageToVideoPath: "/openapi/v2/" + RUNNING_HUB_VIDEO_ENDPOINTS["image-to-video"],
+                queryPath: RUNNING_HUB_QUERY_PATH,
+                statusField: "status",
+                resultField: "results[0].url / results[0].outputUrl",
+                durationRange: "5-13 秒",
+                referenceRule: "参考图使用公网 URL；首帧写入 firstFrameUrl、尾帧写入 lastFrameUrl。",
+                supportsReferenceImage: true,
+                supportsReferenceVideo: true,
+                supportsReferenceAudio: true,
+            },
+        },
         strict: true,
     },
     {

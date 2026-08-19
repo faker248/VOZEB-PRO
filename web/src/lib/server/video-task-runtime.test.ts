@@ -274,3 +274,44 @@ function videoTask(patch: Partial<VideoTask> = {}): VideoTask {
 function json(value: unknown, status = 200) {
     return Response.json(value, { status });
 }
+
+describe("RunningHub video polling", () => {
+    it("polls the H3 task through POST /openapi/v2/query", async () => {
+        const task = videoTask({
+            config: {
+                ...videoTask().config,
+                model: "hailuo-h3",
+                advancedConfig: {
+                    protocol: "runninghub",
+                    createPath: "/openapi/v2/minimax/hailuo-h3/text-to-video",
+                    queryPath: "/openapi/v2/query",
+                    statusField: "status",
+                } as NonNullable<VideoTask["config"]["advancedConfig"]>,
+            },
+            upstream: { id: "rh-task-1", provider: "generation", model: "hailuo-h3", pollPath: "/openapi/v2/minimax/hailuo-h3/text-to-video" },
+        });
+        mocks.fetchInternalApi.mockResolvedValue(json({ taskId: "rh-task-1", status: "SUCCESS", results: [{ url: "https://cdn.runninghub.example.com/out.mp4" }], usage: { consumeMoney: "0.69" } }));
+
+        const step = await queryVideoTaskUpstream(task, "http://localhost");
+
+        expect(step).toMatchObject({ state: "result_ready", resultUrl: "https://cdn.runninghub.example.com/out.mp4" });
+        const [url, init] = mocks.fetchInternalApi.mock.calls[0] as [string, RequestInit];
+        expect(url).toContain("/api/ai/system/channel/openapi/v2/query");
+        expect(init.method).toBe("POST");
+        expect(JSON.parse(String(init.body))).toEqual({ taskId: "rh-task-1" });
+    });
+
+    it("maps a failed H3 task to a terminal failure step", async () => {
+        const task = videoTask({
+            config: {
+                ...videoTask().config,
+                model: "hailuo-h3",
+                advancedConfig: { protocol: "runninghub", queryPath: "/openapi/v2/query", statusField: "status" } as NonNullable<VideoTask["config"]["advancedConfig"]>,
+            },
+            upstream: { id: "rh-task-2", provider: "generation", model: "hailuo-h3", pollPath: "/openapi/v2/minimax/hailuo-h3/text-to-video" },
+        });
+        mocks.fetchInternalApi.mockResolvedValue(json({ taskId: "rh-task-2", status: "FAILED", code: "TASK_FAILED", message: "上游失败" }));
+
+        await expect(queryVideoTaskUpstream(task, "http://localhost")).resolves.toMatchObject({ state: "failed" });
+    });
+});

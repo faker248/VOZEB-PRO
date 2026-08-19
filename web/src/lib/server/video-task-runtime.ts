@@ -14,6 +14,7 @@ import { maintenanceWorkerHeaders } from "@/lib/server/maintenance-auth";
 import { systemAiBillingHeaders } from "@/lib/server/system-ai-billing";
 import { refundVideoTask } from "@/lib/server/video-task-refund";
 import { geminiVideoQueryPath, parseGeminiVideoOperation } from "@/lib/server/gemini-video-provider";
+import { parseRunningHubQueryResponse, RUNNING_HUB_QUERY_PATH } from "@/lib/runninghub-client";
 
 export type VideoUpstreamStep = { state: "pending"; status: string } | { state: "result_ready"; status: string; resultUrl: string } | { state: "failed"; status: string; error: string };
 
@@ -31,6 +32,7 @@ export async function refreshVideoTaskFromUpstream(task: VideoTask, origin: stri
 export async function queryVideoTaskUpstream(task: VideoTask, origin: string, cookie = "", workerUserId = ""): Promise<VideoUpstreamStep> {
     if (task.upstream.resultUrl) return { state: "result_ready", status: "completed", resultUrl: task.upstream.resultUrl };
     if (isGeminiVideoTask(task)) return queryGeminiVideoUpstream(task, origin, cookie, workerUserId);
+    if (isRunningHubVideoTask(task)) return queryRunningHubVideoUpstream(task, origin, cookie, workerUserId);
     const data = await queryVideoUpstream(task, origin, cookie, workerUserId);
     const status = readVideoProviderStatus(data, task.config.advancedConfig?.statusField);
     const resultUrl = readVideoProviderUrl(data, task.config.advancedConfig?.resultField);
@@ -63,6 +65,33 @@ async function queryGeminiVideoUpstream(task: VideoTask, origin: string, cookie:
     return { state: "result_ready", status: operation.status, resultUrl: operation.resultUrl };
 }
 
+async function queryRunningHubVideoUpstream(task: VideoTask, origin: string, cookie: string, workerUserId: string): Promise<VideoUpstreamStep> {
+    const path = task.upstream.queryPath || task.config.advancedConfig?.queryPath || RUNNING_HUB_QUERY_PATH;
+    const url = `${origin}${task.config.baseUrl.replace(/\/+$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+    const response = await fetchInternalApi(url, {
+        method: "POST",
+        headers: { ...videoProxyHeaders(task, cookie, workerUserId), "content-type": "application/json" },
+        body: JSON.stringify({ taskId: task.upstream.id }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(Math.min(resolveModelRequestTimeoutMs(task.config, "video"), 60_000)),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(readVideoProviderHttpError(text, response.status));
+    let data: unknown;
+    try {
+        data = parseVideoProviderJson(text);
+    } catch (error) {
+        throw error instanceof Error ? error : new Error("RunningHub 查询接口返回了无效 JSON");
+    }
+    const step = parseRunningHubQueryResponse(data);
+    if (step.state === "pending") return { state: "pending", status: step.status };
+    if (step.state === "failed") return { state: "failed", status: step.status, error: step.error };
+    if (step.usage) {
+        await updateVideoTask(task.id, { upstream: { ...task.upstream, usage: step.usage } }).catch(() => undefined);
+    }
+    return { state: "result_ready", status: step.status, resultUrl: step.resultUrl };
+}
+
 export async function persistVideoTaskResult(task: VideoTask, resultUrl: string, origin: string, cookie = "", workerUserId = "") {
     return completeVideoTask(task, resultUrl, origin, cookie, workerUserId);
 }
@@ -72,6 +101,7 @@ export async function failVideoTaskFromWorker(task: VideoTask, error: string, re
 }
 
 function taskPollingPolicy(task: VideoTask) {
+    if (isRunningHubVideoTask(task)) return { attempts: 240, intervalMs: 5_000 };
     return videoPollingPolicy(Boolean(globalAiOpcPreset(task)));
 }
 
@@ -224,4 +254,8 @@ function globalAiOpcPreset(task: VideoTask) {
 
 function isGeminiVideoTask(task: VideoTask) {
     return task.config.apiFormat === "gemini" && task.config.advancedConfig?.protocol !== "globalaiopc";
+}
+
+function isRunningHubVideoTask(task: VideoTask) {
+    return task.config.advancedConfig?.protocol === "runninghub";
 }
