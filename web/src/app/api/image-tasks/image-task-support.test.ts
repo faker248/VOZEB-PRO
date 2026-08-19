@@ -17,6 +17,7 @@ import {
     parseImageQueryJson,
     resolveRequestSize,
     resolveResultSize,
+    sanitizeAdvancedConfig,
     sanitizeConfigs,
     shouldFallbackToJsonImageEdit,
     shouldRetryJsonImageEditPayload,
@@ -242,5 +243,32 @@ describe("GlobalAiOpc image task paths", () => {
 
         expect(shouldFallbackToJsonImageEdit(422, message)).toBe(true);
         expect(shouldRetryJsonImageEditPayload(422, message)).toBe(true);
+    });
+});
+
+describe("sanitizeAdvancedConfig keeps ComfyUI workflow fields", () => {
+    it("preserves workflow templates, injections and output node ids", () => {
+        const sanitized = sanitizeAdvancedConfig({
+            protocol: "comfyui",
+            createPath: "/prompt",
+            uploadPath: "/upload/image",
+            viewPath: "/view",
+            outputNodeId: "49",
+            s3BaseUrl: "",
+            maxPixelSeconds: 3.2,
+            workflowTemplate: '{"49":{"class_type":"SaveImageS3"}}',
+            workflowInjection: { prompt: ["22", "text"] },
+            modelConfigs: { "krea2-zit-flux2-klein": { capability: "image", protocol: "comfyui", workflowTemplate: "x" } },
+        } as never);
+        expect(sanitized).toMatchObject({
+            protocol: "comfyui",
+            uploadPath: "/upload/image",
+            viewPath: "/view",
+            outputNodeId: "49",
+            maxPixelSeconds: 3.2,
+            workflowTemplate: '{"49":{"class_type":"SaveImageS3"}}',
+        });
+        expect(sanitized?.workflowInjection).toEqual({ prompt: ["22", "text"] });
+        expect(sanitized?.modelConfigs?.["krea2-zit-flux2-klein"]?.workflowTemplate).toBe("x");
     });
 });

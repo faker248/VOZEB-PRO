@@ -100,6 +100,16 @@ export function sanitizeAdvancedConfig(config?: ImageTaskConfig["advancedConfig"
         supportsReferenceImage: Boolean(config.supportsReferenceImage),
         supportsReferenceVideo: Boolean(config.supportsReferenceVideo),
         supportsReferenceAudio: Boolean(config.supportsReferenceAudio),
+        resolution: textOrEmpty(config.resolution),
+        workflowTemplate: textOrEmpty(config.workflowTemplate),
+        workflowInjection: config.workflowInjection,
+        maxPixelSeconds: config.maxPixelSeconds,
+        outputNodeId: textOrEmpty(config.outputNodeId),
+        s3BaseUrl: textOrEmpty(config.s3BaseUrl),
+        uploadPath: textOrEmpty(config.uploadPath),
+        viewPath: textOrEmpty(config.viewPath),
+        modelConfigs: config.modelConfigs,
+        operationConfigs: config.operationConfigs,
     };
 }
 
