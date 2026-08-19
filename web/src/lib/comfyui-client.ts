@@ -217,6 +217,14 @@ export type ComfyuiWorkflowInput = {
 /** 深拷贝模板并注入占位值；不修改原模板。 */
 export function buildComfyuiWorkflow(input: ComfyuiWorkflowInput): Record<string, unknown> {
     const workflow = JSON.parse(JSON.stringify(input.workflow)) as Record<string, Record<string, unknown>>;
+    // 实例侧未配置 ComfyS3 凭据时 SaveImageS3 上传静默失败且不落本地，
+    // 提交前统一改写为内置 SaveImage（本地保存），产物经 /view 可读。
+    for (const node of Object.values(workflow)) {
+        if (!node || typeof node !== "object") continue;
+        if ((node as Record<string, unknown>).class_type === "SaveImageS3") {
+            (node as Record<string, unknown>).class_type = "SaveImage";
+        }
+    }
     const set = (key: string, value: unknown) => {
         const [nodeId, inputPath] = input.injection[key] || [];
         if (!nodeId || !inputPath) return;
