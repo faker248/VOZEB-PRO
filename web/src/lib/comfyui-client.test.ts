@@ -73,7 +73,8 @@ describe("comfyui workflow injection", () => {
 
     it("injects the Sancai reference image into node 33 only when provided", () => {
         const built = buildComfyuiWorkflow({ workflow: COMFYUI_SANCAI_WORKFLOW, injection: COMFYUI_DEFAULT_INJECTION_SANCAI, prompt: "p", refImage: "uploaded-ref.png" });
-        expect((built["33"] as { inputs: { image: unknown } }).inputs.image).toBe("uploaded-ref.png");
+        expect((built["33"] as { inputs: { image: unknown } }).inputs.image).toEqual(["__vozeb_load_image", 0]);
+        expect((built["__vozeb_load_image"] as { inputs: { image: string } }).inputs.image).toBe("uploaded-ref.png");
         const without = buildComfyuiWorkflow({ workflow: COMFYUI_SANCAI_WORKFLOW, injection: COMFYUI_DEFAULT_INJECTION_SANCAI, prompt: "p" });
         expect((without["33"] as { inputs: { image: unknown } }).inputs.image).toEqual(["18", 0]);
     });
@@ -119,6 +120,30 @@ describe("comfyui history parsing and result urls", () => {
         expect(buildComfyuiViewUrl({ filename: "a b.mp4", subfolder: "MiniMaxH3", type: "output" })).toBe("/view?filename=a%20b.mp4&subfolder=MiniMaxH3&type=output");
         expect(resolveComfyuiS3Url({ filename: "20260819-0001.png", s3BaseUrl: "https://mypic.cn-nb1.rains3.com" })).toBe("https://mypic.cn-nb1.rains3.com/20260819-0001.png");
         expect(resolveComfyuiS3Url({ filename: "20260819-0001.png", s3BaseUrl: "" })).toBeNull();
+    });
+});
+
+describe("comfyui reference image injection", () => {
+    it("wires an external reference through a LoadImage node for tensor inputs", () => {
+        const built = buildComfyuiWorkflow({
+            workflow: { "33": { class_type: "ImageScaleToTotalPixels", inputs: { image: ["18", 0] } }, "18": { class_type: "VAEDecode", inputs: {} } },
+            injection: { refImage: ["33", "image"] },
+            prompt: "p",
+            refImage: "uploaded-ref.png",
+        });
+        expect((built["33"] as { inputs: { image: unknown } }).inputs.image).toEqual(["__vozeb_load_image", 0]);
+        expect((built["__vozeb_load_image"] as { inputs: { image: string } }).inputs.image).toBe("uploaded-ref.png");
+    });
+
+    it("keeps writing the filename directly into existing LoadImage nodes", () => {
+        const built = buildComfyuiWorkflow({
+            workflow: { "300": { class_type: "LoadImage", inputs: { image: "old.png" } }, "136": { class_type: "MiniMaxH3ReferenceToVideo", inputs: { "ref_images.ref_image_0": ["300", 0] } } },
+            injection: { refImage: ["300", "image"] },
+            prompt: "p",
+            refImage: "frame-1.png",
+        });
+        expect((built["300"] as { inputs: { image: string } }).inputs.image).toBe("frame-1.png");
+        expect(built["__vozeb_load_image"]).toBeUndefined();
     });
 });
 
