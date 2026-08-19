@@ -52,19 +52,6 @@ jobs:
         env:
           NEXT_SKIP_BUILD_TYPECHECK: "1"
       # 浏览器 E2E 已解耦到独立 e2e job（runner 网络抖动时不再阻塞镜像构建）
-      - name: PostgreSQL integration tests
-        run: >-
-          pnpm exec vitest run --no-file-parallelism
-          src/lib/server/database/auth-entity-concurrency.postgres.test.ts
-          src/lib/server/admin-backup-store.postgres.test.ts
-          src/lib/server/points-wallet-idempotency.postgres.test.ts
-          src/lib/server/database/work-community-postgres.test.ts
-        env:
-          VOZEB_PRO_DATABASE_PROVIDER: postgres
-          DATABASE_URL: postgres://vozeb:vozeb-e2e-password@127.0.0.1:5432/vozeb_pro_e2e
-          VOZEB_PRO_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-          VOZEB_PRO_RUN_POSTGRES_INTEGRATION: "1"
-          RUN_WORK_COMMUNITY_POSTGRES_INTEGRATION: "1"
 
   e2e:
     needs: quality
@@ -97,10 +84,26 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+        env:
+          NEXT_SKIP_BUILD_TYPECHECK: "1"
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm run e2e
         env:
           VOZEB_PRO_E2E_DATABASE_URL: postgres://vozeb:vozeb-e2e-password@127.0.0.1:5432/vozeb_pro_e2e
+      - name: PostgreSQL integration tests
+        run: >-
+          pnpm exec vitest run --no-file-parallelism
+          src/lib/server/database/auth-entity-concurrency.postgres.test.ts
+          src/lib/server/admin-backup-store.postgres.test.ts
+          src/lib/server/points-wallet-idempotency.postgres.test.ts
+          src/lib/server/database/work-community-postgres.test.ts
+        env:
+          VOZEB_PRO_DATABASE_PROVIDER: postgres
+          DATABASE_URL: postgres://vozeb:vozeb-e2e-password@127.0.0.1:5432/vozeb_pro_e2e
+          VOZEB_PRO_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          VOZEB_PRO_RUN_POSTGRES_INTEGRATION: "1"
+          RUN_WORK_COMMUNITY_POSTGRES_INTEGRATION: "1"
 
   security:
     runs-on: ubuntu-latest
