@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { SystemChannelAdvancedConfig } from "@/lib/auth/store-types";
 import {
     assertReferenceCapabilities,
     assertReferenceUrls,
@@ -129,5 +130,23 @@ describe("provider task config", () => {
         expect(() => assertReferenceUrls(config, [{ url: "https://drama.example/api/reference-assets/temporary/2026/07/25/images/file.png" }])).toThrow("站内参考素材");
         expect(() => assertReferenceUrls(config, [{ url: "https://drama.example/api/reference-assets/temporary/2026/07/25/images/file.png?expires=1&signature=test" }])).toThrow("站内参考素材");
         expect(() => assertReferenceUrls(config, [{ url: "https://drama.example/api/reference-assets/temporary/2026/07/25/images/file.png?purpose=provider-read&expires=1&signature=test" }])).not.toThrow();
+    });
+});
+
+describe("RunningHub reference roles", () => {
+    it("accepts explicit first and last frames for the RunningHub protocol", () => {
+        const config = { protocol: "runninghub" as const } as SystemChannelAdvancedConfig;
+        expect(() => assertVideoReferenceRoles(config, [{ type: "image", url: "https://cdn.example.com/a.png", role: "first_frame" }])).not.toThrow();
+        expect(() => assertVideoReferenceRoles(config, [{ type: "image", url: "https://cdn.example.com/b.png", role: "last_frame" }])).not.toThrow();
+        expect(() =>
+            assertVideoReferenceRoles(config, [
+                { type: "image", url: "https://cdn.example.com/c.png", role: "first_frame" },
+                { type: "image", url: "https://cdn.example.com/d.png", role: "last_frame" },
+            ]),
+        ).not.toThrow();
+    });
+
+    it("keeps rejecting last frames for protocols without that capability", () => {
+        expect(() => assertVideoReferenceRoles({ protocol: "openai" as const } as SystemChannelAdvancedConfig, [{ type: "image", url: "https://cdn.example.com/b.png", role: "last_frame" }])).toThrow("当前视频模型不支持尾帧输入");
     });
 });
