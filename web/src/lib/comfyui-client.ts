@@ -239,6 +239,7 @@ export type ComfyuiGuardInput = {
     durationSeconds: number;
     width: number;
     height: number;
+    vquality?: string;
     advancedConfig?: { durationRange?: string; maxDurationSeconds?: number; maxPixelSeconds?: number } | null;
 };
 
@@ -248,6 +249,8 @@ export function resolveComfyuiVideoGuard(input: ComfyuiGuardInput): string | nul
     if (!Number.isFinite(seconds) || seconds < 1) return "视频时长参数无效";
     const maxDuration = resolveComfyuiMaxDurationSeconds(input.advancedConfig);
     if (seconds > maxDuration) return "ComfyUI H3 视频时长上限 " + maxDuration + " 秒（渠道高级配置 durationRange 改 5-15 秒可放开至 15 秒），本次请求 " + seconds + " 秒已被拦截，未提交上游。";
+    const qualityPixels = Number(String(input.vquality || "").replace(/p$/i, ""));
+    if (Number.isFinite(qualityPixels) && qualityPixels > 0 && qualityPixels > COMFYUI_MAX_HEIGHT_PIXELS) return "ComfyUI H3 分辨率上限 " + COMFYUI_MAX_HEIGHT_PIXELS + "p（显存红线），本次请求清晰度 " + qualityPixels + "p 已被拦截，未提交上游。";
     const longEdge = Math.max(1, Math.floor(Number(input.width)) || 1, Math.floor(Number(input.height)) || 1);
     if (longEdge > COMFYUI_MAX_HEIGHT_PIXELS) return "ComfyUI H3 分辨率上限 " + COMFYUI_MAX_HEIGHT_PIXELS + "p（显存红线），本次请求长边 " + longEdge + " 已被拦截，未提交上游。";
     const maxPixelSeconds = positiveNumber(input.advancedConfig?.maxPixelSeconds) ?? COMFYUI_MAX_PIXEL_SECONDS_DEFAULT;
