@@ -64,3 +64,41 @@ describe("system channel model capabilities", () => {
         });
     });
 });
+
+describe("comfyui model config round-trip", () => {
+    it("persists workflow templates and injection mappings through the normalizer", () => {
+        const normalized = normalizeSystemChannelAdvancedConfig({
+            protocol: "comfyui",
+            modelConfigs: {
+                "minimax-h3-r2v": {
+                    capability: "video",
+                    protocol: "comfyui",
+                    createPath: "/prompt",
+                    uploadPath: "/upload/image",
+                    queryPath: "/history/:task_id",
+                    viewPath: "/view",
+                    outputNodeId: "92",
+                    durationRange: "5-13 秒",
+                    maxPixelSeconds: 3.2,
+                    s3BaseUrl: "",
+                    workflowTemplate: '{"92":{"class_type":"SaveVideo"}}',
+                    workflowInjection: { prompt: ["138", "value"], duration: ["132", "value"] },
+                },
+            },
+        } as never);
+        const config = normalized?.modelConfigs?.["minimax-h3-r2v"];
+        expect(config).toMatchObject({
+            capability: "video",
+            protocol: "comfyui",
+            createPath: "/prompt",
+            uploadPath: "/upload/image",
+            queryPath: "/history/:task_id",
+            viewPath: "/view",
+            outputNodeId: "92",
+            durationRange: "5-13 秒",
+            maxPixelSeconds: 3.2,
+            workflowTemplate: '{"92":{"class_type":"SaveVideo"}}',
+        });
+        expect(config?.workflowInjection).toEqual({ prompt: ["138", "value"], duration: ["132", "value"] });
+    });
+});
