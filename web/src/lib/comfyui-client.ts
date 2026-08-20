@@ -24,6 +24,9 @@ export const COMFYUI_MAX_DURATION_OPTIONS = [13, 15] as const;
 export const COMFYUI_MAX_HEIGHT_PIXELS = 720;
 export const COMFYUI_MAX_PIXEL_SECONDS_DEFAULT = 3.2;
 // 1MP × 15s = 15 MP·s：OOM 禁区（实例实测），永不触碰。
+
+// ComfyS3 插件的 S3_OUTPUT_DIR 前缀（来自实例 /workspace/ComfyUI/custom_nodes/ComfyS3/.env）
+export const COMFYUI_S3_KEY_PREFIX = "workspace/ComfyUI/output";
 export const COMFYUI_OOM_FORBIDDEN_NOTE = "1MP×15s 为 OOM 禁区（0.4MP×8s=3.2MP·s 为已实证红线）";
 
 export class ComfyuiVideoRejectedError extends Error {}
@@ -217,14 +220,6 @@ export type ComfyuiWorkflowInput = {
 /** 深拷贝模板并注入占位值；不修改原模板。 */
 export function buildComfyuiWorkflow(input: ComfyuiWorkflowInput): Record<string, unknown> {
     const workflow = JSON.parse(JSON.stringify(input.workflow)) as Record<string, Record<string, unknown>>;
-    // 实例侧未配置 ComfyS3 凭据时 SaveImageS3 上传静默失败且不落本地，
-    // 提交前统一改写为内置 SaveImage（本地保存），产物经 /view 可读。
-    for (const node of Object.values(workflow)) {
-        if (!node || typeof node !== "object") continue;
-        if ((node as Record<string, unknown>).class_type === "SaveImageS3") {
-            (node as Record<string, unknown>).class_type = "SaveImage";
-        }
-    }
     const set = (key: string, value: unknown) => {
         const [nodeId, inputPath] = input.injection[key] || [];
         if (!nodeId || !inputPath) return;
@@ -332,7 +327,10 @@ export function buildComfyuiViewUrl(file: { filename: string; subfolder: string;
 export function resolveComfyuiS3Url(input: { filename: string; s3BaseUrl?: string | null }) {
     const base = (input.s3BaseUrl || "").trim().replace(/\/+$/, "");
     if (!base) return null;
-    return base + "/" + input.filename.replace(/^\/+/, "");
+    // 如果 base 只有域名（不含路径），补全 S3_OUTPUT_DIR 前缀
+    const pathPart = base.replace(/^https?:\/\/[^/]+/, "");
+    const fullBase = pathPart ? base : base + "/" + COMFYUI_S3_KEY_PREFIX;
+    return fullBase + "/" + input.filename.replace(/^\/+/, "");
 }
 
 function resolveComfyuiMaxDurationSeconds(advancedConfig?: ComfyuiGuardInput["advancedConfig"]): number {
