@@ -227,11 +227,11 @@ export function buildComfyuiWorkflow(input: ComfyuiWorkflowInput): Record<string
         if (n.class_type === "SaveImageS3") {
             const inputs = n.inputs as Record<string, unknown> | undefined;
             if (!inputs?.images || !Array.isArray(inputs.images)) {
-                throw new GenerationSubmissionSafeFailure("ComfyUI 工作流 SaveImageS3 节点 #" + nodeId + " 缺少 images 输入链接");
+                throw new Error("ComfyUI 工作流 SaveImageS3 节点 #" + nodeId + " 缺少 images 输入链接");
             }
         }
     }
-        const set = (key: string, value: unknown) => {
+    const set = (key: string, value: unknown) => {
         const [nodeId, inputPath] = input.injection[key] || [];
         if (!nodeId || !inputPath) return;
         const node = workflow[nodeId];
@@ -252,7 +252,7 @@ export function buildComfyuiWorkflow(input: ComfyuiWorkflowInput): Record<string
             if (refNode && typeof refNode === "object" && (refNode as Record<string, unknown>).class_type === "LoadImage") {
                 set("refImage", input.refImage);
             } else {
-                workflow["__vozeb_load_image"] = { class_type: "LoadImage", inputs: { image: input.refImage } };
+                workflow["__vozeb_load_image"] = { class_type: "LoadImageS3", inputs: { image: input.refImage } };
                 const target = refNode && typeof refNode === "object" ? (refNode as { inputs?: Record<string, unknown> }).inputs : undefined;
                 if (target) target[refInputPath] = ["__vozeb_load_image", 0];
             }

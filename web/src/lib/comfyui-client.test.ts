@@ -124,15 +124,16 @@ describe("comfyui history parsing and result urls", () => {
 });
 
 describe("comfyui reference image injection", () => {
-    it("wires an external reference through a LoadImage node for tensor inputs", () => {
+    it("wires an external reference through a LoadImageS3 node for tensor inputs", () => {
         const built = buildComfyuiWorkflow({
             workflow: { "33": { class_type: "ImageScaleToTotalPixels", inputs: { image: ["18", 0] } }, "18": { class_type: "VAEDecode", inputs: {} } },
             injection: { refImage: ["33", "image"] },
             prompt: "p",
-            refImage: "uploaded-ref.png",
+            refImage: "reference.png",
         });
         expect((built["33"] as { inputs: { image: unknown } }).inputs.image).toEqual(["__vozeb_load_image", 0]);
-        expect((built["__vozeb_load_image"] as { inputs: { image: string } }).inputs.image).toBe("uploaded-ref.png");
+        expect((built["__vozeb_load_image"] as { class_type: string; inputs: { image: string } }).class_type).toBe("LoadImageS3");
+        expect((built["__vozeb_load_image"] as { inputs: { image: string } }).inputs.image).toBe("reference.png");
     });
 
     it("keeps writing the filename directly into existing LoadImage nodes", () => {
