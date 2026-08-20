@@ -118,7 +118,7 @@ describe("comfyui history parsing and result urls", () => {
 
     it("builds /view urls and estimates S3 urls", () => {
         expect(buildComfyuiViewUrl({ filename: "a b.mp4", subfolder: "MiniMaxH3", type: "output" })).toBe("/view?filename=a%20b.mp4&subfolder=MiniMaxH3&type=output");
-        expect(resolveComfyuiS3Url({ filename: "20260819-0001.png", s3BaseUrl: "https://mypic.cn-nb1.rains3.com" })).toBe("https://mypic.cn-nb1.rains3.com/20260819-0001.png");
+        expect(resolveComfyuiS3Url({ filename: "20260819-0001.png", s3BaseUrl: "https://mypic.cn-nb1.rains3.com" })).toBe("https://mypic.cn-nb1.rains3.com/workspace/ComfyUI/output/20260819-0001.png");
         expect(resolveComfyuiS3Url({ filename: "20260819-0001.png", s3BaseUrl: "" })).toBeNull();
     });
 });
@@ -147,18 +147,30 @@ describe("comfyui reference image injection", () => {
     });
 });
 
-describe("comfyui S3 save node fallback", () => {
-    it("rewrites SaveImageS3 nodes to SaveImage in submitted workflows", () => {
+describe("comfyui S3 direct upload", () => {
+    it("preserves SaveImageS3 nodes in submitted workflows", () => {
         const built = buildComfyuiWorkflow({
             workflow: { "49": { class_type: "SaveImageS3", inputs: { filename_prefix: "【屿僳】终版", images: ["45", 0] } }, "45": { class_type: "ImageScaleBy", inputs: {} } },
             injection: {},
             prompt: "p",
         });
-        expect(built["49"]).toMatchObject({ class_type: "SaveImage", inputs: { filename_prefix: "【屿僳】终版" } });
-        // 非 S3 保存节点不动
+        expect(built["49"]).toMatchObject({ class_type: "SaveImageS3", inputs: { filename_prefix: "【屿僳】终版" } });
         expect(built["45"]).toMatchObject({ class_type: "ImageScaleBy" });
-        // 模板本体不被修改
-        expect((COMFYUI_SANCAI_WORKFLOW as Record<string, { class_type?: string }>)["49"].class_type).toBe("SaveImageS3");
+    });
+
+    it("derives S3 public URL from filename with key prefix", () => {
+        const url = resolveComfyuiS3Url({ filename: "krea打样_20260820_020311_01_.png", s3BaseUrl: "https://mypic.cn-nb1.rains3.com" });
+        expect(url).toBe("https://mypic.cn-nb1.rains3.com/workspace/ComfyUI/output/krea打样_20260820_020311_01_.png");
+    });
+
+    it("derives S3 URL when s3BaseUrl already includes path prefix", () => {
+        const url = resolveComfyuiS3Url({ filename: "test.png", s3BaseUrl: "https://mypic.cn-nb1.rains3.com/workspace/ComfyUI/output" });
+        expect(url).toBe("https://mypic.cn-nb1.rains3.com/workspace/ComfyUI/output/test.png");
+    });
+
+    it("returns null when s3BaseUrl is empty", () => {
+        expect(resolveComfyuiS3Url({ filename: "test.png", s3BaseUrl: "" })).toBeNull();
+        expect(resolveComfyuiS3Url({ filename: "test.png" })).toBeNull();
     });
 });
 

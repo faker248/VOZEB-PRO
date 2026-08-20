@@ -35,7 +35,7 @@ const comfySancaiOperation: ProtocolOperation = {
     outputNodeId: "49",
     workflowTemplate: JSON.stringify(COMFYUI_SANCAI_WORKFLOW),
     workflowInjection: COMFYUI_DEFAULT_INJECTION_SANCAI,
-    s3BaseUrl: "",
+    s3BaseUrl: "https://mypic.cn-nb1.rains3.com/workspace/ComfyUI/output",
     supportsReferenceImage: true,
     supportsReferenceVideo: false,
     supportsReferenceAudio: false,
