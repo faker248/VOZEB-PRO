@@ -129,10 +129,11 @@ describe("comfyui reference image injection", () => {
             workflow: { "33": { class_type: "ImageScaleToTotalPixels", inputs: { image: ["18", 0] } }, "18": { class_type: "VAEDecode", inputs: {} } },
             injection: { refImage: ["33", "image"] },
             prompt: "p",
-            refImage: "uploaded-ref.png",
+            refImage: "reference.png",
         });
         expect((built["33"] as { inputs: { image: unknown } }).inputs.image).toEqual(["__vozeb_load_image", 0]);
-        expect((built["__vozeb_load_image"] as { inputs: { image: string } }).inputs.image).toBe("uploaded-ref.png");
+        expect((built["__vozeb_load_image"] as { class_type: string }).class_type).toBe("LoadImage");
+        expect((built["__vozeb_load_image"] as { inputs: { image: string } }).inputs.image).toBe("reference.png");
     });
 
     it("keeps writing the filename directly into existing LoadImage nodes", () => {
