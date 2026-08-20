@@ -252,7 +252,7 @@ export function buildComfyuiWorkflow(input: ComfyuiWorkflowInput): Record<string
             if (refNode && typeof refNode === "object" && (refNode as Record<string, unknown>).class_type === "LoadImage") {
                 set("refImage", input.refImage);
             } else {
-                workflow["__vozeb_load_image"] = { class_type: "LoadImageS3", inputs: { image: input.refImage } };
+                workflow["__vozeb_load_image"] = { class_type: "LoadImage", inputs: { image: input.refImage } };
                 const target = refNode && typeof refNode === "object" ? (refNode as { inputs?: Record<string, unknown> }).inputs : undefined;
                 if (target) target[refInputPath] = ["__vozeb_load_image", 0];
             }
