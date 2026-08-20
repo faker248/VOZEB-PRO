@@ -220,7 +220,18 @@ export type ComfyuiWorkflowInput = {
 /** 深拷贝模板并注入占位值；不修改原模板。 */
 export function buildComfyuiWorkflow(input: ComfyuiWorkflowInput): Record<string, unknown> {
     const workflow = JSON.parse(JSON.stringify(input.workflow)) as Record<string, Record<string, unknown>>;
-    const set = (key: string, value: unknown) => {
+    // 防复发：验证 SaveImageS3 节点存在且 images 链接完整（M3.1 教训）
+    for (const [nodeId, node] of Object.entries(workflow)) {
+        if (!node || typeof node !== "object") continue;
+        const n = node as Record<string, unknown>;
+        if (n.class_type === "SaveImageS3") {
+            const inputs = n.inputs as Record<string, unknown> | undefined;
+            if (!inputs?.images || !Array.isArray(inputs.images)) {
+                throw new GenerationSubmissionSafeFailure("ComfyUI 工作流 SaveImageS3 节点 #" + nodeId + " 缺少 images 输入链接");
+            }
+        }
+    }
+        const set = (key: string, value: unknown) => {
         const [nodeId, inputPath] = input.injection[key] || [];
         if (!nodeId || !inputPath) return;
         const node = workflow[nodeId];
